@@ -5,16 +5,17 @@ import jwt from "jsonwebtoken";
 // ------------------ REGISTER USER ------------------
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, password, phone, role, address, lat, lng, bloodGroup } = req.body;
-
+    const { name, email, password, phone, role, bloodGroup, location } = req.body;
 
     // 1️⃣ Validate input
-    if (!name || !email || !password || !phone || !address || !lat || !lng) {
+    if (!name || !email || !password || !phone || !location?.address || !location?.coordinates) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
       });
     }
+
+    const [lng, lat] = location.coordinates; // Extract coordinates
 
     // 2️⃣ Check if user exists
     const existingUser = await User.findOne({ email });
@@ -37,14 +38,13 @@ export const registerUser = async (req, res) => {
       role,
       bloodGroup,
       location: {
-        address,
+        address: location.address,
         coordinates: {
           type: "Point",
-          coordinates: [lng, lat]
-        }
-      }
+          coordinates: [lng, lat],
+        },
+      },
     });
-
 
     return res.status(201).json({
       success: true,
@@ -55,7 +55,6 @@ export const registerUser = async (req, res) => {
         role: newUser.role,
       },
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -104,7 +103,6 @@ export const loginUser = async (req, res) => {
       message: "Login successful",
       token,
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
