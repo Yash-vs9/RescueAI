@@ -7,6 +7,11 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     phone: { type: String, required: true },
     role: { type: String, enum: ["donor", "hospital"], default: "donor" },
+    bloodGroup: {
+      type: String,
+      enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+    },
+
     isAvailable: { type: Boolean, default: true },
 
     location: {

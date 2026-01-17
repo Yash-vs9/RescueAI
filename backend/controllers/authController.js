@@ -5,7 +5,8 @@ import jwt from "jsonwebtoken";
 // ------------------ REGISTER USER ------------------
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, password, phone, address, lat, lng } = req.body;
+    const { name, email, password, phone, role, address, lat, lng, bloodGroup } = req.body;
+
 
     // 1️⃣ Validate input
     if (!name || !email || !password || !phone || !address || !lat || !lng) {
@@ -33,14 +34,17 @@ export const registerUser = async (req, res) => {
       email,
       password: hashedPassword,
       phone,
+      role,
+      bloodGroup,
       location: {
         address,
         coordinates: {
           type: "Point",
-          coordinates: [Number(lng), Number(lat)],
-        },
-      },
+          coordinates: [lng, lat]
+        }
+      }
     });
+
 
     return res.status(201).json({
       success: true,
