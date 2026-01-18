@@ -3,6 +3,8 @@ import { Droplets, MapPin, AlertCircle, PlusCircle, Loader2, Send, Info } from "
 import { motion, AnimatePresence } from "framer-motion";
 
 const BloodRequestForm = ({ onSuccess }) => {
+  const API_URL = import.meta.env.VITE_API_URL;
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -57,7 +59,7 @@ const BloodRequestForm = ({ onSuccess }) => {
     };
 
     try {
-      const response = await fetch("http://localhost:3000/api/blood-requests", {
+      const response = await fetch(`${API_URL}/api/blood-requests`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

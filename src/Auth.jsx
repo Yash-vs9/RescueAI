@@ -15,6 +15,8 @@ import {
 import { useNavigate } from "react-router-dom";
 
 const RescueBloodAuth = () => {
+  const API_URL = import.meta.env.VITE_API_URL;
+
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [userType, setUserType] = useState("donor");
@@ -93,7 +95,7 @@ const RescueBloodAuth = () => {
         };
 
     try {
-      const response = await fetch(`http://localhost:3000${endpoint}`, {
+      const response = await fetch(`${API_URL}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { io } from "socket.io-client";
 
 const RescueBlood = () => {
+  const API_URL=import.meta.env.VITE_API_URL;
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [emergencies, setEmergencies] = useState([]);
@@ -51,7 +52,7 @@ const RescueBlood = () => {
   useEffect(() => {
     if (!token || userRole !== "donor") return;
     
-    const socket = io("http://localhost:3000", { 
+    const socket = io(`${API_URL}`, { 
       auth: { token },
       transports: ['websocket'] 
     });
@@ -74,7 +75,7 @@ const RescueBlood = () => {
     if (userRole !== "donor" || !coords.lat || !coords.lng) return;
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/blood-requests/nearby?lat=${coords.lat}&lng=${coords.lng}`, {
+      const res = await fetch(`${API_URL}/api/blood-requests/nearby?lat=${coords.lat}&lng=${coords.lng}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -90,7 +91,7 @@ const RescueBlood = () => {
     if (userRole !== "hospital" || !coords.lat || !coords.lng) return;
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/user/nearby?lat=${coords.lat}&lng=${coords.lng}&distance=50`, {
+      const res = await fetch(`${API_URL}/api/user/nearby?lat=${coords.lat}&lng=${coords.lng}&distance=50`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -104,7 +105,7 @@ const RescueBlood = () => {
 
   const toggleAvailability = async () => {
     try {
-      const res = await fetch("http://localhost:3000/api/user/availability", {
+      const res = await fetch(`${API_URL}/api/user/availability`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",
