@@ -76,6 +76,7 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    // Find user and include the role and location for the frontend
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({
@@ -93,15 +94,23 @@ export const loginUser = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role }, // Optional: Add role to JWT payload
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
+    // --- KEY ADDITION: Return the user info ---
     return res.status(200).json({
       success: true,
       message: "Login successful",
       token,
+      user: {
+        id: user._id,
+        name: user.name,
+        role: user.role, // "donor" or "hospital"
+        bloodGroup: user.bloodGroup,
+        location: user.location, // Contains coordinates for nearby searches
+      },
     });
   } catch (error) {
     return res.status(500).json({

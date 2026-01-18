@@ -31,7 +31,11 @@ app.use((req, res, next) => {
   req.io = io;
   next();
 });
-
+app.use(cors({
+  origin: "http://localhost:5173", // Replace with your frontend URL (e.g., 3000 or 5173)
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
 // ------------------ ROUTES ------------------
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
@@ -46,10 +50,14 @@ app.get("/", (req, res) => {
 const server = http.createServer(app);
 
 // ------------------ ATTACH SOCKET.IO ------------------
+// server.js
 io = new Server(server, {
   cors: {
-    origin: "*", // restrict later for frontend
+    origin: "http://localhost:5173", // Use your specific frontend URL
+    methods: ["GET", "POST"],
+    credentials: true
   },
+  transports: ['websocket', 'polling'] // Allow fallback to polling if WS fails
 });
 
 // ------------------ SOCKET AUTHENTICATION ------------------
@@ -79,11 +87,12 @@ io.use(async (socket, next) => {
 io.on("connection", async (socket) => {
   const user = socket.user;
 
-  // 1️⃣ Join rooms
-  socket.join(`user:${user._id}`);
+  // Force .toString() to ensure the room name is a valid string
+  const userIdStr = user._id.toString(); 
+  socket.join(`user:${userIdStr}`);
   socket.join(`role:${user.role}`);
 
-  console.log(`Socket connected: ${socket.id} | User: ${user.name}`);
+  console.log(`✅ Socket joined room: user:${userIdStr}`);
 
   // 2️⃣ Send unread notifications if donor
   if (user.role === "donor") {
@@ -115,8 +124,7 @@ io.on("connection", async (socket) => {
 
 
 // ------------------ START SERVER ------------------
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
