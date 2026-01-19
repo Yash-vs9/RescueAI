@@ -23,6 +23,7 @@ POST /api/blood-requests (protected, hospital only)
 
  
 - Real-time notifications to online donors.  
+- Notifications through e-mail.
 - Offline donors receive notifications automatically when they connect.  
 - Only hospitals can create blood requests.  
 - JWT protects all sensitive routes.
