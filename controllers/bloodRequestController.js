@@ -1,7 +1,7 @@
 import BloodRequest from "../model/BloodRequest.js";
 import User from "../model/User.js";
 import Notification from "../model/Notification.js";
-import bloodCompatibility from "../bloodCompatibility.js";
+import bloodCompatibility from "../utils/bloodCompatibility.js";
 import nodemailer from "nodemailer";
 
 /* =========================
