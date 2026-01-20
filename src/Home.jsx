@@ -8,7 +8,11 @@ import { useNavigate } from 'react-router-dom';
 import { io } from "socket.io-client";
 
 const RescueBlood = () => {
-  const API_URL=import.meta.env.VITE_API_URL;
+  // 1. URL CONFIGURATION
+  // Since your Render server (socketServer.js) handles everything, we use its URL
+  const RENDER_URL = "https://rescueai-1.onrender.com";
+  const apiUrl = import.meta.env.VITE_API_URL;
+
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [emergencies, setEmergencies] = useState([]);
@@ -16,7 +20,6 @@ const RescueBlood = () => {
   const [isAvailable, setIsAvailable] = useState(true);
   const [newAlert, setNewAlert] = useState(null);
 
-  // 1. Initialize coords state from localStorage safely
   const [coords, setCoords] = useState({
     lat: localStorage.getItem("userLat") || null,
     lng: localStorage.getItem("userLng") || null
@@ -25,40 +28,36 @@ const RescueBlood = () => {
   const userRole = localStorage.getItem("role") || "guest";
   const token = localStorage.getItem("token");
 
-  // 2. GEOLOCATION FIX: Fetch GPS if storage is empty and update state
+  // 2. GEOLOCATION
   useEffect(() => {
     if (userRole !== "guest" && (!coords.lat || !coords.lng)) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const newLat = position.coords.latitude;
           const newLng = position.coords.longitude;
-          
-          // Save to storage for persistence
           localStorage.setItem("userLat", newLat);
           localStorage.setItem("userLng", newLng);
-          
-          // Update state to trigger useEffect dependencies
           setCoords({ lat: newLat, lng: newLng });
         },
-        (err) => {
-          console.error("Location access denied:", err);
-          // Optional: Set a default location if GPS fails
-        }
+        (err) => console.error("Location access denied:", err)
       );
     }
   }, [userRole, coords.lat, coords.lng]);
 
-  // 3. Socket Integration (Port 3000)
+  // 3. SOCKET INTEGRATION (Render URL)
   useEffect(() => {
     if (!token || userRole !== "donor") return;
     
-    const socket = io(`${API_URL}`, { 
+    // Connect to the Render URL
+    const socket = io(RENDER_URL, { 
       auth: { token },
-      transports: ['websocket'] 
+      transports: ['websocket', 'polling'] // Allow fallback for better connectivity
     });
 
+    socket.on("connect", () => console.log("📡 Connected to Render WebSocket"));
+
     socket.on("blood_request", (data) => {
-      console.log("data sent")
+      console.log("New Emergency Received:", data);
       setEmergencies((prev) => {
         const exists = prev.find(e => e.requestId === data.requestId || e._id === data.requestId);
         if (exists) return prev;
@@ -67,15 +66,19 @@ const RescueBlood = () => {
       setNewAlert(data);
     });
 
-    return () => socket.disconnect();
-  }, [token, userRole]);
+    socket.on("connect_error", (err) => {
+      console.error("Socket Connection Error:", err.message);
+    });
 
-  // 4. API Logic: targets Port 3000 and depends on 'coords' state
+    return () => socket.disconnect();
+  }, [token, userRole, RENDER_URL]);
+
+  // 4. API LOGIC (Now pointing to Render)
   const fetchNearbyRequests = useCallback(async () => {
     if (userRole !== "donor" || !coords.lat || !coords.lng) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/blood-requests/nearby?lat=${coords.lat}&lng=${coords.lng}`, {
+      const res = await fetch(`${apiUrl}/api/blood-requests/nearby?lat=${coords.lat}&lng=${coords.lng}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -85,13 +88,13 @@ const RescueBlood = () => {
     } finally {
       setLoading(false);
     }
-  }, [userRole, coords, token]);
+  }, [userRole, coords, token, RENDER_URL]);
 
   const fetchNearbyDonors = useCallback(async () => {
     if (userRole !== "hospital" || !coords.lat || !coords.lng) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/user/nearby?lat=${coords.lat}&lng=${coords.lng}&distance=50`, {
+      const res = await fetch(`${apiUrl}/api/user/nearby?lat=${coords.lat}&lng=${coords.lng}&distance=50`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -101,11 +104,11 @@ const RescueBlood = () => {
     } finally {
       setLoading(false);
     }
-  }, [userRole, coords, token]);
+  }, [userRole, coords, token, RENDER_URL]);
 
   const toggleAvailability = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/user/availability`, {
+      const res = await fetch(`${apiUrl}/api/user/availability`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",
@@ -120,7 +123,6 @@ const RescueBlood = () => {
     }
   };
 
-  // Re-fetch data whenever coordinates or roles change
   useEffect(() => {
     if (userRole === "donor") fetchNearbyRequests();
     if (userRole === "hospital") fetchNearbyDonors();
@@ -301,7 +303,6 @@ const ImpactCard = ({ icon, count, label }) => (
 );
 
 const HospitalCard = ({ hospital, type, units, time, status }) => {
-  // Mapping low, medium, high to colors
   const colors = { high: 'bg-red-600', medium: 'bg-orange-500', low: 'bg-blue-600' };
   return (
     <motion.div whileHover={{ y: -10 }} className="bg-white p-8 rounded-[48px] border border-slate-50 shadow-2xl relative overflow-hidden group">
