@@ -8,9 +8,25 @@ import Notification from "./model/Notification.js";
 
 const server = http.createServer(app);
 
+// Update this block
 const io = new Server(server, {
+  cors: {
+    origin: [
+      "http://localhost:5173", 
+      "https://rescueai-rust.vercel.app"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  },
   transports: ["websocket", "polling"]
 });
+
+// IMPORTANT: Attach io to the app so your routes can use req.io
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
 
 io.use(async (socket, next) => {
   try {
