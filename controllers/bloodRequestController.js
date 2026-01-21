@@ -3,6 +3,7 @@ import User from "../model/User.js";
 import Notification from "../model/Notification.js";
 import bloodCompatibility from "../utils/bloodCompatibility.js";
 import nodemailer from "nodemailer";
+import { analyzeBloodRequestWithAI } from "../services/aiService.js";
 //nodemailer :D
 /* =========================
    EMAIL TRANSPORTER (GMAIL EXAMPLE)
@@ -21,50 +22,54 @@ const transporter = nodemailer.createTransport({
  */
 export const createBloodRequest = async (req, res) => {
   try {
-    // 1. Authorization Check
     if (req.user.role !== "hospital") {
-      return res
-        .status(403)
-        .json({ success: false, message: "Unauthorized access" });
+      return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
     const { bloodGroup, units, urgency, location } = req.body;
-
-    // 2. Strict Coordinate Parsing (Force Numbers for MongoDB)
     const lng = parseFloat(location?.coordinates?.[0]);
     const lat = parseFloat(location?.coordinates?.[1]);
 
     if (!bloodGroup || !units || !location?.address || isNaN(lng) || isNaN(lat)) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    // --- STEP: AI AGENT WORKFLOW ---
+    const aiAnalysis = await analyzeBloodRequestWithAI({
+      bloodGroup,
+      units,
+      urgency,
+      address: location.address,
+      hospitalName: req.user.name
+    });
+
+    if (!aiAnalysis.isAddressValid) {
       return res.status(400).json({
         success: false,
-        message:
-          "Missing fields: Blood group, units, address, and coordinates are all required.",
+        message: "The address provided appears to be invalid or contains random symbols. Please provide a clear location."
       });
     }
 
-    // 3. Save Request to Database
+    // 3. Save Request to Database (including AI Description)
     const request = await BloodRequest.create({
       hospital: req.user._id,
       hospitalName: req.user.name,
       bloodGroup,
       units,
       urgency,
+      description: aiAnalysis.aiDescription, // SAVE AI DESC HERE
       location: {
         address: location.address,
         coordinates: {
           type: "Point",
-          coordinates: [lng, lat], // Order: [Longitude, Latitude]
+          coordinates: [lng, lat],
         },
       },
     });
+    console.log(request)
 
-    // 4. Find Donors within 50km Radius (compatible donors)
+    // 4. Find Donors (keep compatibility logic same)
     const compatibleGroups = bloodCompatibility[bloodGroup];
-
-    if (!compatibleGroups) {
-      return res.status(400).json({ success: false, message: "Invalid blood group" });
-    }
-
     const donors = await User.find({
       role: "donor",
       bloodGroup: { $in: compatibleGroups },
@@ -72,41 +77,26 @@ export const createBloodRequest = async (req, res) => {
       "location.coordinates": {
         $nearSphere: {
           $geometry: { type: "Point", coordinates: [lng, lat] },
-          $maxDistance: 50000, // 50km
+          $maxDistance: 50000, 
         },
       },
     });
 
-    console.log(`🔍 BROADCAST: Found ${donors.length} eligible donors nearby.`);
-
-    // 5. Real-time, DB, and Email notifications
+    // 5. Broadcast with AI Content
     for (let donor of donors) {
-      const donorIdStr = donor._id.toString();
-      const roomId = `user:${donorIdStr}`;
-
+      const roomId = `user:${donor._id}`;
+      
       const notificationData = {
         requestId: request._id,
-        hospital: {
-          id: req.user._id,
-          name: req.user.name,
-          location: location.address,
-        },
+        hospital: { name: req.user.name, location: location.address },
         bloodGroup,
         units,
         urgency,
+        description: aiAnalysis.aiDescription // Send AI desc via socket
       };
 
-      // --- Real-time Socket.io ---
-      if (req.io) {
-        const clientsInRoom = req.io.sockets.adapter.rooms.get(roomId);
-        console.log(
-          `📡 Emitting to ${roomId} | Active Listeners: ${clientsInRoom ? clientsInRoom.size : 0}`
-        );
+      if (req.io) req.io.to(roomId).emit("blood_request", notificationData);
 
-        req.io.to(roomId).emit("blood_request", notificationData);
-      }
-
-      // --- Database notification ---
       await Notification.create({
         donor: donor._id,
         bloodRequest: request._id,
@@ -114,39 +104,29 @@ export const createBloodRequest = async (req, res) => {
         bloodGroup,
         units,
         urgency,
-        isDelivered: false,
+        message: aiAnalysis.aiDescription // Save AI message
       });
 
-      // --- Email notification ---
+      // --- AI-Generated Email ---
       const emailOptions = {
-        from: '"RescueBlood" <your-email@gmail.com>',
+        from: '"RescueBlood Admin" <your-email@gmail.com>',
         to: donor.email,
-        subject: "Emergency Blood Request",
-        text: `Hi ${donor.name},
-
-Hospital ${req.user.name} needs ${units} units of ${bloodGroup} blood at ${location.address}.
-Urgency: ${urgency}.
-
-Please help if available.
-
-Thank you!
-`,
+        subject: `🚨 Urgent: ${bloodGroup} Blood Donation Needed Near You`,
+        text: `Hi ${donor.name},\n\n${aiAnalysis.aiEmailBody}\n\nThank you,\nRescueBlood Team`,
       };
 
-      transporter.sendMail(emailOptions, (err, info) => {
-        if (err) console.log("Email error:", err);
-        else console.log("Email sent to", donor.email);
-      });
+      transporter.sendMail(emailOptions).catch(e => console.log("Email Failed", e));
     }
 
     res.status(201).json({
       success: true,
-      message: `Broadcast successful. ${donors.length} donors notified.`,
+      message: `AI validated request. ${donors.length} donors notified via AI-generated alerts.`,
       request,
     });
+
   } catch (error) {
-    console.error("🔥 Error in createBloodRequest:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    console.error("🔥 Controller Error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 

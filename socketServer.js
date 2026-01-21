@@ -13,7 +13,8 @@ const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173", 
-      "https://rescueai-rust.vercel.app"
+      "https://rescueai-rust.vercel.app",
+      "https://rescue-ai-theta.vercel.app"
     ],
     methods: ["GET", "POST"],
     credentials: true
