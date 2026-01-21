@@ -1,14 +1,84 @@
-// controllers/donationController.js
+/// controllers/donationController.js
 import Donation from "../model/Donation.js";
 import User from "../model/User.js";
 import BloodRequest from "../model/BloodRequest.js";
+import Notification from "../model/Notification.js"; // ✅ added missing import
 
 /* ============================
-   HOSPITAL CONFIRM DONATION (WITH SOCKET & NOTIFICATION)
+   DONOR ACCEPTS BLOOD REQUEST
+============================ */
+export const acceptBloodRequest = async (req, res) => {
+  try {
+    // 1️⃣ Only donors
+    if (req.user.role !== "donor") {
+      return res.status(403).json({
+        success: false,
+        message: "Only donors can accept blood requests",
+      });
+    }
+
+    const { bloodRequestId } = req.body;
+
+    if (!bloodRequestId) {
+      return res.status(400).json({
+        success: false,
+        message: "bloodRequestId is required",
+      });
+    }
+
+    // 2️⃣ Fetch request
+    const request = await BloodRequest.findById(bloodRequestId);
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Blood request not found",
+      });
+    }
+
+    // 3️⃣ Validate request state
+    if (request.status !== "open") {
+      return res.status(400).json({
+        success: false,
+        message: "Blood request is not open for acceptance",
+      });
+    }
+
+    if (request.acceptedDonor) {
+      return res.status(400).json({
+        success: false,
+        message: "This request has already been accepted by another donor",
+      });
+    }
+
+    // 4️⃣ Accept request
+    request.acceptedDonor = req.user._id;
+    request.acceptedAt = new Date();
+    request.status = "in_progress";
+
+    await request.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Blood request accepted successfully",
+      requestId: request._id,
+    });
+  } catch (error) {
+    console.error("acceptBloodRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================
+   HOSPITAL CONFIRM DONATION
 ============================ */
 export const confirmDonation = async (req, res) => {
   try {
-    // 1️ Only hospitals can confirm
+    // 1️⃣ Only hospitals can confirm
     if (req.user.role !== "hospital") {
       return res.status(403).json({
         success: false,
@@ -18,7 +88,7 @@ export const confirmDonation = async (req, res) => {
 
     const { donorId, bloodRequestId, units } = req.body;
 
-    // 2️ Validate input
+    // 2️⃣ Validate input
     if (!donorId || !bloodRequestId || !units || units <= 0) {
       return res.status(400).json({
         success: false,
@@ -26,7 +96,7 @@ export const confirmDonation = async (req, res) => {
       });
     }
 
-    // 3️ Verify donor exists
+    // 3️⃣ Verify donor exists
     const donor = await User.findById(donorId);
     if (!donor || donor.role !== "donor") {
       return res.status(404).json({
@@ -35,7 +105,7 @@ export const confirmDonation = async (req, res) => {
       });
     }
 
-    // 4️ Verify blood request exists
+    // 4️⃣ Verify blood request exists
     const request = await BloodRequest.findById(bloodRequestId);
     if (!request) {
       return res.status(404).json({
@@ -44,7 +114,15 @@ export const confirmDonation = async (req, res) => {
       });
     }
 
-    // 5 Create donation record
+    // Optional: Ensure donor accepted this request
+    if (request.acceptedDonor && request.acceptedDonor.toString() !== donorId) {
+      return res.status(400).json({
+        success: false,
+        message: "This donor did not accept this blood request",
+      });
+    }
+
+    // 5️⃣ Create donation record
     const donation = await Donation.create({
       donor: donorId,
       hospital: req.user._id,
@@ -54,8 +132,11 @@ export const confirmDonation = async (req, res) => {
       bloodRequest: bloodRequestId,
     });
 
-    // 6️ Optional: create DB notification for donor history
-    // (like how you did for blood requests)
+    // 6️⃣ Update blood request status to completed
+    request.status = "completed";
+    await request.save();
+
+    // 7️⃣ Optional: create DB notification for donor
     const notification = await Notification.create({
       donor: donorId,
       bloodRequest: bloodRequestId,
@@ -66,30 +147,31 @@ export const confirmDonation = async (req, res) => {
       isDelivered: false,
     });
 
-    // 7️ Socket.io: send real-time notification to donor
+    // 8️⃣ Socket.io: notify donor in real-time
     if (req.io) {
       const roomId = `user:${donorId}`;
       req.io.to(roomId).emit("donation_confirmed", {
         donationId: donation._id,
         hospitalName: req.user.name,
-        units: units,
+        units,
         bloodGroup: donor.bloodGroup,
         donationDate: donation.donationDate,
-        bloodRequestId: bloodRequestId
+        bloodRequestId,
       });
 
-      // Optional: mark notification delivered immediately if donor is online
+      // Mark notification delivered immediately if donor online
       notification.isDelivered = true;
       await notification.save();
     }
 
     return res.status(201).json({
       success: true,
-      message: "Donation confirmed and donor notified successfully",
+      message:
+        "Donation confirmed, donor notified, and blood request updated successfully",
       donation,
     });
   } catch (error) {
-    console.error(" confirmDonation error:", error);
+    console.error("confirmDonation error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -98,13 +180,11 @@ export const confirmDonation = async (req, res) => {
   }
 };
 
-
 /* ============================
    DONOR DASHBOARD
 ============================ */
 export const getDonorDashboard = async (req, res) => {
   try {
-    // 1️ Only donors
     if (req.user.role !== "donor") {
       return res.status(403).json({
         success: false,
@@ -112,24 +192,17 @@ export const getDonorDashboard = async (req, res) => {
       });
     }
 
-    // 2️ Fetch all donations by this donor
     const donations = await Donation.find({ donor: req.user._id })
       .populate("hospital", "name")
       .sort({ donationDate: -1 });
 
-    // 3️ Total units donated
     const totalUnits = donations.reduce((sum, d) => sum + d.units, 0);
-
-    // 4️ Last donation date
     const lastDonationDate = donations.length > 0 ? donations[0].donationDate : null;
-
-    // 5️ Calculate next eligible date (90 days cooldown)
     const nextEligibleDate = lastDonationDate
       ? new Date(new Date(lastDonationDate).getTime() + 90 * 24 * 60 * 60 * 1000)
       : null;
 
-    // 6️ Prepare history
-    const history = donations.map(d => ({
+    const history = donations.map((d) => ({
       date: d.donationDate,
       units: d.units,
       bloodGroup: d.bloodGroup,
@@ -150,7 +223,7 @@ export const getDonorDashboard = async (req, res) => {
       history,
     });
   } catch (error) {
-    console.error(" getDonorDashboard error:", error);
+    console.error("getDonorDashboard error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -164,7 +237,6 @@ export const getDonorDashboard = async (req, res) => {
 ============================ */
 export const getHospitalDashboard = async (req, res) => {
   try {
-    // 1️ Only hospitals
     if (req.user.role !== "hospital") {
       return res.status(403).json({
         success: false,
@@ -172,23 +244,19 @@ export const getHospitalDashboard = async (req, res) => {
       });
     }
 
-    // 2️ Fetch all donations received by this hospital
     const donations = await Donation.find({ hospital: req.user._id })
       .populate("donor", "name bloodGroup")
       .sort({ donationDate: -1 });
 
-    // 3️ Total units received
     const totalUnits = donations.reduce((sum, d) => sum + d.units, 0);
 
-    // 4️ Blood group summary
     const bloodGroupSummary = {};
-    donations.forEach(d => {
+    donations.forEach((d) => {
       const group = d.bloodGroup;
       bloodGroupSummary[group] = (bloodGroupSummary[group] || 0) + d.units;
     });
 
-    // 5️ Prepare history
-    const history = donations.map(d => ({
+    const history = donations.map((d) => ({
       date: d.donationDate,
       donorName: d.donor.name,
       bloodGroup: d.bloodGroup,
@@ -205,7 +273,7 @@ export const getHospitalDashboard = async (req, res) => {
       history,
     });
   } catch (error) {
-    console.error(" getHospitalDashboard error:", error);
+    console.error("getHospitalDashboard error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
