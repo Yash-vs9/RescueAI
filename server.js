@@ -4,6 +4,10 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import bloodRequestRoutes from "./routes/bloodRequestRoutes.js";
+import donationRoutes from "./routes/donationRoutes.js";
+
+
+
 
 const app = express();
 
@@ -58,6 +62,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/blood-requests", bloodRequestRoutes);
+app.use("/api/donations", donationRoutes);
 
 app.get("/", (req, res) => {
   res.send("RescueBlood API is live");
