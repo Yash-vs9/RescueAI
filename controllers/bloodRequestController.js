@@ -109,10 +109,10 @@ export const createBloodRequest = async (req, res) => {
 
       // --- AI-Generated Email ---
       const emailOptions = {
-        from: '"RescueBlood Admin" <your-email@gmail.com>',
+        from: '"Savify Admin" <your-email@gmail.com>',
         to: donor.email,
         subject: `🚨 Urgent: ${bloodGroup} Blood Donation Needed Near You`,
-        text: `Hi ${donor.name},\n\n${aiAnalysis.aiEmailBody}\n\nThank you,\nRescueBlood Team`,
+        text: `Hi ${donor.name},\n\n${aiAnalysis.aiEmailBody}\n\nThank you,\nSavify Team`,
       };
 
       transporter.sendMail(emailOptions).catch(e => console.log("Email Failed", e));
