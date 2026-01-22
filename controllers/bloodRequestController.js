@@ -4,17 +4,24 @@ import Notification from "../model/Notification.js";
 import bloodCompatibility from "../utils/bloodCompatibility.js";
 import nodemailer from "nodemailer";
 import { analyzeBloodRequestWithAI } from "../services/aiService.js";
-//nodemailer :D
-/* =========================
-   EMAIL TRANSPORTER (GMAIL EXAMPLE)
-========================= */
+
+// =========================
+// EMAIL TRANSPORTER (GMAIL EXAMPLE)
+// =========================
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER, // your email
-    pass: process.env.EMAIL_PASS, // app password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
+
+// =========================
+// HOSPITAL REQUEST RATE LIMIT
+// =========================
+const hospitalRequestMap = new Map(); // { hospitalId: { count, firstRequestTime } }
+const MAX_REQUESTS = 5; // max requests per minute
+const TIME_WINDOW = 60 * 1000; // 1 minute in ms
 
 /**
  * @desc    Create emergency request and broadcast to nearby donors
@@ -26,6 +33,31 @@ export const createBloodRequest = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
+    // =======================
+    // RATE LIMIT CHECK
+    // =======================
+    const hospitalId = req.user._id.toString();
+    const now = Date.now();
+    const record = hospitalRequestMap.get(hospitalId);
+
+    if (record) {
+      if (now - record.firstRequestTime < TIME_WINDOW) {
+        if (record.count >= MAX_REQUESTS) {
+          return res.status(429).json({
+            success: false,
+            message: `You are making requests too fast! Max ${MAX_REQUESTS} requests per minute allowed.`,
+          });
+        } else {
+          record.count += 1;
+        }
+      } else {
+        // Reset counter after 1 minute
+        hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
+      }
+    } else {
+      hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
+    }
+
     const { bloodGroup, units, urgency, location } = req.body;
     const lng = parseFloat(location?.coordinates?.[0]);
     const lat = parseFloat(location?.coordinates?.[1]);
@@ -34,7 +66,9 @@ export const createBloodRequest = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // --- STEP: AI AGENT WORKFLOW ---
+    // =======================
+    // AI ANALYSIS
+    // =======================
     const aiAnalysis = await analyzeBloodRequestWithAI({
       bloodGroup,
       units,
@@ -50,14 +84,16 @@ export const createBloodRequest = async (req, res) => {
       });
     }
 
-    // 3. Save Request to Database (including AI Description)
+    // =======================
+    // SAVE BLOOD REQUEST
+    // =======================
     const request = await BloodRequest.create({
       hospital: req.user._id,
       hospitalName: req.user.name,
       bloodGroup,
       units,
       urgency,
-      description: aiAnalysis.aiDescription, // SAVE AI DESC HERE
+      description: aiAnalysis.aiDescription,
       location: {
         address: location.address,
         coordinates: {
@@ -66,9 +102,12 @@ export const createBloodRequest = async (req, res) => {
         },
       },
     });
-    console.log(request)
 
-    // 4. Find Donors (keep compatibility logic same)
+    console.log(request);
+
+    // =======================
+    // FIND DONORS
+    // =======================
     const compatibleGroups = bloodCompatibility[bloodGroup];
     const donors = await User.find({
       role: "donor",
@@ -77,22 +116,24 @@ export const createBloodRequest = async (req, res) => {
       "location.coordinates": {
         $nearSphere: {
           $geometry: { type: "Point", coordinates: [lng, lat] },
-          $maxDistance: 50000, 
+          $maxDistance: 50000,
         },
       },
     });
 
-    // 5. Broadcast with AI Content
+    // =======================
+    // BROADCAST TO DONORS
+    // =======================
     for (let donor of donors) {
       const roomId = `user:${donor._id}`;
-      
+
       const notificationData = {
         requestId: request._id,
         hospital: { name: req.user.name, location: location.address },
         bloodGroup,
         units,
         urgency,
-        description: aiAnalysis.aiDescription // Send AI desc via socket
+        description: aiAnalysis.aiDescription
       };
 
       if (req.io) req.io.to(roomId).emit("blood_request", notificationData);
@@ -104,10 +145,9 @@ export const createBloodRequest = async (req, res) => {
         bloodGroup,
         units,
         urgency,
-        message: aiAnalysis.aiDescription // Save AI message
+        message: aiAnalysis.aiDescription
       });
 
-      // --- AI-Generated Email ---
       const emailOptions = {
         from: '"Savify Admin" <your-email@gmail.com>',
         to: donor.email,
