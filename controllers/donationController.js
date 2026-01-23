@@ -3,7 +3,7 @@ import Donation from "../model/Donation.js";
 import User from "../model/User.js";
 import BloodRequest from "../model/BloodRequest.js";
 import Notification from "../model/Notification.js"; // ✅ added missing import
-
+import mongoose from "mongoose";
 /* ============================
    DONOR ACCEPTS BLOOD REQUEST
 ============================ */
@@ -102,6 +102,15 @@ export const confirmDonation = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Donor not found",
+      });
+    }
+    if (
+      !mongoose.Types.ObjectId.isValid(donorId) ||
+      !mongoose.Types.ObjectId.isValid(bloodRequestId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid donorId or bloodRequestId",
       });
     }
 
