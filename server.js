@@ -4,6 +4,7 @@ import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import bloodRequestRoutes from "./routes/bloodRequestRoutes.js";
 import donationRoutes from "./routes/donationRoutes.js";
+import chatRoutes from "./routes/chat.js";
 
 import dotenv from "dotenv";
 dotenv.config(); // 👈 MUST be before using process.env
@@ -65,6 +66,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/blood-requests", bloodRequestRoutes);
 app.use("/api/donations", donationRoutes);
+app.use("/api/chat", chatRoutes);
 
 app.get("/", (req, res) => {
   res.send("RescueBlood API is live");
@@ -76,13 +78,8 @@ app.get("/", (req, res) => {
 // ✅ On Vercel: connect once per function lifecycle
 // ✅ On Render/local: normal startup
 connectDB();
-if (!process.env.VERCEL) {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running locally on port ${PORT}`);
-  });
-}
+
 /* ======================
-   EXPORT FOR VERCEL
+   EXPORT FOR VERCEL & SOCKET
 ====================== */
 export default app;
