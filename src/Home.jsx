@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { io } from "socket.io-client";
+import DonationConfirmationModal from './components/DonationConfirmationModal';
 
 const RescueBlood = () => {
   // 1. URL CONFIGURATION
@@ -19,6 +20,11 @@ const RescueBlood = () => {
   const [nearbyDonors, setNearbyDonors] = useState([]);
   const [isAvailable, setIsAvailable] = useState(true);
   const [newAlert, setNewAlert] = useState(null);
+
+  // Modal states for hospital donation confirmation
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [selectedDonor, setSelectedDonor] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
 
   const [coords, setCoords] = useState({
     lat: localStorage.getItem("userLat") || null,
@@ -85,7 +91,7 @@ const RescueBlood = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      console.log(data)
+      console.log(data);
       if (data.success) setEmergencies(data.requests);
     } catch (err) {
       console.error("Fetch Emergencies Failed", err);
@@ -142,24 +148,52 @@ const RescueBlood = () => {
     }
   }, [userRole, coords.lat, coords.lng, fetchNearbyDonors]);
 
+  // 6. API INTEGRATION - Accept Blood Request (Donor)
+  const handleAcceptRequest = async (requestId) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/donations/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ bloodRequestId: requestId })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Show success notification
+        alert('Blood request accepted successfully! The hospital will be notified.');
+        
+        // Update the emergencies list to reflect the acceptance
+        setEmergencies(prev => 
+          prev.map(req => 
+            req._id === requestId || req.requestId === requestId
+              ? { ...req, status: 'in_progress' }
+              : req
+          )
+        );
+      } else {
+        alert(data.message || 'Failed to accept request');
+      }
+    } catch (error) {
+      console.error('Accept request error:', error);
+      alert('Failed to accept blood request. Please try again.');
+    }
+  };
+
+  // 7. API INTEGRATION - Confirm Donation Handler (Hospital)
+  const handleConfirmDonation = (donation) => {
+    console.log('Donation confirmed:', donation);
+    alert('Donation confirmed successfully! The donor has been notified.');
+    // Refresh the nearby donors list
+    fetchNearbyDonors();
+  };
+
   const handleLogout = () => {
     localStorage.clear();
     navigate('/auth');
-  };
-
-  // Helper function to format time
-  const getTimeAgo = (dateString) => {
-    const now = new Date();
-    const past = new Date(dateString);
-    const diffMs = now - past;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
 
   // --- VIEWS ---
@@ -250,7 +284,7 @@ const RescueBlood = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.9 + (index * 0.1), duration: 0.6 }}
               >
-                <BloodRequestCard request={req} />
+                <BloodRequestCard request={req} onAccept={handleAcceptRequest} />
               </motion.div>
             ))}
           </motion.div>
@@ -339,12 +373,18 @@ const RescueBlood = () => {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.7 + (index * 0.05), duration: 0.5 }}
-              className="donor-card group"
+              className="donor-card group cursor-pointer"
+              onClick={() => {
+                setSelectedDonor(donor);
+                setSelectedRequest(emergencies[0] || { _id: 'temp-request' });
+                setShowConfirmModal(true);
+              }}
             >
               <div className="blood-badge group-hover:scale-110 transition-transform duration-300">
                 {donor.bloodGroup}
               </div>
               <p className="font-body font-bold text-forest text-sm mt-4">{donor.name}</p>
+              <p className="text-xs text-sage mt-1">Click to confirm</p>
             </motion.div>
           ))}
         </div>
@@ -656,6 +696,8 @@ const RescueBlood = () => {
           padding: 0.875rem 1.25rem;
           background: rgba(255, 255, 255, 0.9);
           color: var(--sage);
+          // CONTINUATION OF Home.jsx (Part 2 - from line ~730)
+
           border-radius: 18px;
           border: 2px solid rgba(90, 122, 107, 0.1);
           font-weight: 700;
@@ -1069,7 +1111,7 @@ const RescueBlood = () => {
           gap: 0.75rem;
         }
 
-        .action-button:hover {
+        .action-button:hover:not(:disabled) {
           transform: translateY(-2px);
           box-shadow: 0 15px 40px rgba(193, 64, 61, 0.4);
           background: linear-gradient(135deg, #A63634 0%, var(--crimson) 100%);
@@ -1120,7 +1162,7 @@ const RescueBlood = () => {
         }
       `}</style>
 
-      {/* 🔔 REAL-TIME POPUP */}
+      {/* 🔔 REAL-TIME POPUP WITH ACCEPT HANDLER */}
       <AnimatePresence>
         {newAlert && (
           <motion.div 
@@ -1144,8 +1186,18 @@ const RescueBlood = () => {
               <strong> {newAlert.bloodGroup}</strong> blood immediately.
             </p>
             <div className="alert-buttons">
-              <button className="alert-accept">Accept</button>
-              <button onClick={() => setNewAlert(null)} className="alert-ignore">Ignore</button>
+              <button 
+                className="alert-accept"
+                onClick={() => {
+                  handleAcceptRequest(newAlert._id || newAlert.requestId);
+                  setNewAlert(null);
+                }}
+              >
+                Accept
+              </button>
+              <button onClick={() => setNewAlert(null)} className="alert-ignore">
+                Ignore
+              </button>
             </div>
           </motion.div>
         )}
@@ -1222,6 +1274,19 @@ const RescueBlood = () => {
           </motion.div>
         )}
       </main>
+
+      {/* DONATION CONFIRMATION MODAL FOR HOSPITALS */}
+      <DonationConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => {
+          setShowConfirmModal(false);
+          setSelectedDonor(null);
+          setSelectedRequest(null);
+        }}
+        donor={selectedDonor || {}}
+        bloodRequest={selectedRequest || {}}
+        onConfirm={handleConfirmDonation}
+      />
     </div>
   );
 };
@@ -1237,7 +1302,9 @@ const ImpactCard = ({ icon, count, label }) => (
   </div>
 );
 
-const BloodRequestCard = ({ request }) => {
+const BloodRequestCard = ({ request, onAccept }) => {
+  const [isAccepting, setIsAccepting] = useState(false);
+
   const getTimeAgo = (dateString) => {
     const now = new Date();
     const past = new Date(dateString);
@@ -1262,6 +1329,12 @@ const BloodRequestCard = ({ request }) => {
     high: <AlertCircle size={14} />,
     medium: <Clock size={14} />,
     low: <CheckCircle size={14} />
+  };
+
+  const handleAcceptClick = async () => {
+    setIsAccepting(true);
+    await onAccept(request._id || request.requestId);
+    setIsAccepting(false);
   };
 
   return (
@@ -1297,7 +1370,6 @@ const BloodRequestCard = ({ request }) => {
 
       {/* Body */}
       <div className="request-body">
-        {/* Blood Requirement Display */}
         <div className="blood-requirement">
           <div className="blood-type-display">
             <div className="blood-icon-large">
@@ -1314,14 +1386,12 @@ const BloodRequestCard = ({ request }) => {
           </div>
         </div>
 
-        {/* Description */}
         {request.description && (
           <div className="description-section">
             <p className="description-text">{request.description}</p>
           </div>
         )}
 
-        {/* Location */}
         {request.location?.address && (
           <div className="location-section">
             <div className="location-icon">
@@ -1353,10 +1423,20 @@ const BloodRequestCard = ({ request }) => {
         
         <button 
           className="action-button"
-          disabled={request.status !== 'open'}
+          onClick={handleAcceptClick}
+          disabled={request.status !== 'open' || isAccepting}
         >
-          <Heart size={20} />
-          {request.status === 'open' ? 'I Can Help' : 'Request Closed'}
+          {isAccepting ? (
+            <>
+              <Loader2 className="animate-spin" size={20} />
+              Accepting...
+            </>
+          ) : (
+            <>
+              <Heart size={20} />
+              {request.status === 'open' ? 'I Can Help' : 'Request Closed'}
+            </>
+          )}
         </button>
       </div>
     </motion.div>
