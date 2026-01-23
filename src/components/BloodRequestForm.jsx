@@ -82,8 +82,10 @@ const BloodRequestForm = ({ onSuccess }) => {
       });
 
       const data = await response.json();
+      console.log(data)
 
-      if (response.ok) {
+      if (response.ok) {  
+
         setSuccess(true);
         if (onSuccess) onSuccess(data.request);
         setRequestData(prev => ({ ...prev, bloodGroup: "", units: "", address: "" }));

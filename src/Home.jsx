@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Heart, Plus, Droplets, Hospital, Search, Share2, Activity, Users, 
-  ShieldCheck, PlusCircle, History, Bell, LogOut, MapPin, Loader2, RefreshCcw, X, BellRing
+  ShieldCheck, PlusCircle, History, Bell, LogOut, MapPin, Loader2, RefreshCcw, X, BellRing,
+  Clock, AlertCircle, CheckCircle, Navigation, Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -84,6 +85,7 @@ const RescueBlood = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
+      console.log(data)
       if (data.success) setEmergencies(data.requests);
     } catch (err) {
       console.error("Fetch Emergencies Failed", err);
@@ -143,6 +145,21 @@ const RescueBlood = () => {
   const handleLogout = () => {
     localStorage.clear();
     navigate('/auth');
+  };
+
+  // Helper function to format time
+  const getTimeAgo = (dateString) => {
+    const now = new Date();
+    const past = new Date(dateString);
+    const diffMs = now - past;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
 
   // --- VIEWS ---
@@ -224,7 +241,7 @@ const RescueBlood = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.9, staggerChildren: 0.1 }}
-            className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
+            className="grid md:grid-cols-2 gap-8"
           >
             {emergencies.map((req, index) => (
               <motion.div
@@ -233,13 +250,7 @@ const RescueBlood = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.9 + (index * 0.1), duration: 0.6 }}
               >
-                <HospitalCard 
-                  hospital={req.hospitalName || req.hospital?.name} 
-                  type={req.bloodGroup} 
-                  units={req.units} 
-                  time="Required Now" 
-                  status={req.urgency} 
-                />
+                <BloodRequestCard request={req} />
               </motion.div>
             ))}
           </motion.div>
@@ -804,6 +815,272 @@ const RescueBlood = () => {
           transform: rotate(90deg);
         }
 
+        /* Blood Request Card Styles */
+        .blood-request-card {
+          background: rgba(255, 255, 255, 0.85);
+          backdrop-filter: blur(25px);
+          border-radius: 35px;
+          border: 2px solid rgba(255, 255, 255, 0.9);
+          box-shadow: 
+            0 20px 60px rgba(47, 69, 56, 0.1),
+            0 5px 20px rgba(193, 64, 61, 0.05),
+            inset 0 1px 0 rgba(255, 255, 255, 1);
+          overflow: hidden;
+          transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .blood-request-card:hover {
+          transform: translateY(-8px);
+          box-shadow: 
+            0 35px 80px rgba(47, 69, 56, 0.15),
+            0 10px 30px rgba(193, 64, 61, 0.1),
+            inset 0 1px 0 rgba(255, 255, 255, 1);
+          border-color: rgba(193, 64, 61, 0.2);
+        }
+
+        .request-header {
+          padding: 2rem 2rem 1.5rem;
+          border-bottom: 2px solid rgba(90, 122, 107, 0.08);
+        }
+
+        .request-body {
+          padding: 2rem;
+        }
+
+        .request-footer {
+          padding: 1.5rem 2rem 2rem;
+          background: rgba(90, 122, 107, 0.02);
+        }
+
+        .hospital-info {
+          display: flex;
+          align-items: flex-start;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .hospital-avatar {
+          background: linear-gradient(135deg, var(--sage) 0%, var(--forest) 100%);
+          width: 3.5rem;
+          height: 3.5rem;
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 8px 25px rgba(90, 122, 107, 0.25);
+          flex-shrink: 0;
+        }
+
+        .hospital-details h3 {
+          font-family: 'Crimson Pro', serif;
+          font-size: 1.4rem;
+          font-weight: 800;
+          color: var(--forest);
+          margin: 0 0 0.25rem;
+          line-height: 1.2;
+        }
+
+        .request-meta {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          flex-wrap: wrap;
+        }
+
+        .meta-item {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--sage);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .urgency-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.5rem 1rem;
+          border-radius: 15px;
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.7rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        }
+
+        .urgency-high {
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15) 0%, rgba(193, 64, 61, 0.1) 100%);
+          color: var(--crimson);
+          border: 2px solid rgba(193, 64, 61, 0.2);
+        }
+
+        .urgency-medium {
+          background: linear-gradient(135deg, rgba(224, 120, 86, 0.15) 0%, rgba(224, 120, 86, 0.1) 100%);
+          color: var(--terracotta);
+          border: 2px solid rgba(224, 120, 86, 0.2);
+        }
+
+        .urgency-low {
+          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15) 0%, rgba(90, 122, 107, 0.1) 100%);
+          color: var(--sage);
+          border: 2px solid rgba(90, 122, 107, 0.2);
+        }
+
+        .blood-requirement {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 2rem;
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.05) 0%, rgba(224, 120, 86, 0.05) 100%);
+          border-radius: 25px;
+          border: 2px solid rgba(193, 64, 61, 0.1);
+          margin-bottom: 1.5rem;
+        }
+
+        .blood-type-display {
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+        }
+
+        .blood-icon-large {
+          background: linear-gradient(135deg, var(--crimson) 0%, var(--terracotta) 100%);
+          padding: 1.25rem;
+          border-radius: 22px;
+          box-shadow: 0 10px 30px rgba(193, 64, 61, 0.3);
+        }
+
+        .blood-type-text {
+          font-family: 'Crimson Pro', serif;
+          font-size: 3.5rem;
+          font-weight: 800;
+          color: var(--crimson);
+          line-height: 1;
+          letter-spacing: -0.02em;
+        }
+
+        .units-display {
+          text-align: right;
+        }
+
+        .units-label {
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.7rem;
+          font-weight: 700;
+          color: var(--sage);
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          margin-bottom: 0.5rem;
+        }
+
+        .units-value {
+          font-family: 'Crimson Pro', serif;
+          font-size: 2.5rem;
+          font-weight: 800;
+          color: var(--forest);
+          line-height: 1;
+        }
+
+        .description-section {
+          margin-bottom: 1.5rem;
+        }
+
+        .description-text {
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.95rem;
+          line-height: 1.7;
+          color: var(--forest);
+          font-weight: 500;
+        }
+
+        .location-section {
+          display: flex;
+          align-items: flex-start;
+          gap: 1rem;
+          padding: 1.5rem;
+          background: rgba(90, 122, 107, 0.05);
+          border-radius: 20px;
+          margin-bottom: 1.5rem;
+        }
+
+        .location-icon {
+          background: rgba(224, 120, 86, 0.15);
+          padding: 0.75rem;
+          border-radius: 15px;
+          color: var(--terracotta);
+          flex-shrink: 0;
+        }
+
+        .location-text {
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.9rem;
+          color: var(--forest);
+          font-weight: 600;
+          line-height: 1.5;
+        }
+
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 1.25rem;
+          border-radius: 15px;
+          font-family: 'Outfit', sans-serif;
+          font-size: 0.75rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        }
+
+        .status-open {
+          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15) 0%, rgba(90, 122, 107, 0.1) 100%);
+          color: var(--sage);
+          border: 2px solid rgba(90, 122, 107, 0.2);
+        }
+
+        .status-closed {
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15) 0%, rgba(193, 64, 61, 0.1) 100%);
+          color: var(--crimson);
+          border: 2px solid rgba(193, 64, 61, 0.2);
+        }
+
+        .action-button {
+          width: 100%;
+          background: linear-gradient(135deg, var(--crimson) 0%, #A63634 100%);
+          color: white;
+          padding: 1.25rem;
+          border-radius: 20px;
+          border: none;
+          font-family: 'Outfit', sans-serif;
+          font-weight: 800;
+          font-size: 0.95rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          box-shadow: 0 10px 30px rgba(193, 64, 61, 0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.75rem;
+        }
+
+        .action-button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 15px 40px rgba(193, 64, 61, 0.4);
+          background: linear-gradient(135deg, #A63634 0%, var(--crimson) 100%);
+        }
+
+        .action-button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none;
+        }
+
         @media (max-width: 768px) {
           nav {
             padding: 1.25rem 1.5rem;
@@ -824,6 +1101,21 @@ const RescueBlood = () => {
 
           .nav-user-name {
             display: none;
+          }
+
+          .blood-requirement {
+            flex-direction: column;
+            gap: 1.5rem;
+            text-align: center;
+          }
+
+          .units-display {
+            text-align: center;
+          }
+
+          .blood-type-display {
+            flex-direction: column;
+            gap: 1rem;
           }
         }
       `}</style>
@@ -945,47 +1237,128 @@ const ImpactCard = ({ icon, count, label }) => (
   </div>
 );
 
-const HospitalCard = ({ hospital, type, units, time, status }) => {
-  const colors = { 
-    high: 'from-crimson to-red-700', 
-    medium: 'from-terracotta to-orange-600', 
-    low: 'from-sage to-emerald-700' 
+const BloodRequestCard = ({ request }) => {
+  const getTimeAgo = (dateString) => {
+    const now = new Date();
+    const past = new Date(dateString);
+    const diffMs = now - past;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
   };
-  
+
+  const urgencyColors = {
+    high: 'urgency-high',
+    medium: 'urgency-medium',
+    low: 'urgency-low'
+  };
+
+  const urgencyIcons = {
+    high: <AlertCircle size={14} />,
+    medium: <Clock size={14} />,
+    low: <CheckCircle size={14} />
+  };
+
   return (
-    <motion.div 
-      whileHover={{ y: -12, scale: 1.02 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      className="organic-card relative overflow-hidden group cursor-pointer"
+    <motion.div
+      whileHover={{ y: -5 }}
+      className="blood-request-card"
     >
-      <div className={`absolute top-0 right-0 px-6 py-2.5 text-[9px] font-body font-black uppercase text-white tracking-[0.2em] bg-gradient-to-r ${colors[status] || 'from-slate-400 to-slate-500'} rounded-bl-3xl`}>
-        {status}
+      {/* Header */}
+      <div className="request-header">
+        <div className="hospital-info">
+          <div className="hospital-avatar">
+            <Hospital className="text-cream" size={24} />
+          </div>
+          <div className="hospital-details flex-1">
+            <h3>{request.hospitalName || 'Hospital'}</h3>
+            <div className="request-meta">
+              <span className="meta-item">
+                <Clock size={12} />
+                {getTimeAgo(request.createdAt)}
+              </span>
+              <span className="meta-item">
+                <MapPin size={12} />
+                {request.location?.address?.split(',')[request.location?.address?.split(',').length - 1]?.trim() || 'Location'}
+              </span>
+            </div>
+          </div>
+          <div className={`urgency-badge ${urgencyColors[request.urgency] || 'urgency-medium'}`}>
+            {urgencyIcons[request.urgency] || urgencyIcons.medium}
+            {request.urgency}
+          </div>
+        </div>
       </div>
-      
-      <div className="flex items-center gap-4 mb-8 mt-3">
-        <div className="bg-gradient-to-br from-stone-50 to-stone-100 p-5 rounded-3xl group-hover:from-red-50 group-hover:to-red-100 transition-all duration-500">
-          <Hospital className="text-sage group-hover:text-crimson transition-colors duration-500" size={32} />
+
+      {/* Body */}
+      <div className="request-body">
+        {/* Blood Requirement Display */}
+        <div className="blood-requirement">
+          <div className="blood-type-display">
+            <div className="blood-icon-large">
+              <Droplets className="text-cream" size={32} />
+            </div>
+            <div>
+              <div className="units-label">Blood Group</div>
+              <div className="blood-type-text">{request.bloodGroup}</div>
+            </div>
+          </div>
+          <div className="units-display">
+            <div className="units-label">Units Required</div>
+            <div className="units-value">{request.units} ml</div>
+          </div>
         </div>
-        <div>
-          <h3 className="font-display font-bold text-2xl text-forest leading-none mb-2">{hospital}</h3>
-          <p className="text-[9px] font-body font-bold text-sage/60 uppercase tracking-[0.2em]">{time}</p>
-        </div>
+
+        {/* Description */}
+        {request.description && (
+          <div className="description-section">
+            <p className="description-text">{request.description}</p>
+          </div>
+        )}
+
+        {/* Location */}
+        {request.location?.address && (
+          <div className="location-section">
+            <div className="location-icon">
+              <Navigation size={20} />
+            </div>
+            <div className="location-text">
+              {request.location.address}
+            </div>
+          </div>
+        )}
       </div>
-      
-      <div className="bg-gradient-to-br from-stone-50 to-stone-100 rounded-3xl p-8 flex justify-between items-center mb-8 group-hover:from-red-50 group-hover:to-red-100 transition-all duration-500">
-        <div>
-          <p className="text-[9px] font-body font-black text-sage/50 mb-2 tracking-[0.2em]">BLOOD GROUP</p>
-          <p className="text-6xl font-display font-bold text-crimson tracking-tighter">{type}</p>
+
+      {/* Footer */}
+      <div className="request-footer">
+        <div className="flex items-center justify-between mb-4">
+          <div className={`status-badge ${request.status === 'open' ? 'status-open' : 'status-closed'}`}>
+            {request.status === 'open' ? <CheckCircle size={14} /> : <X size={14} />}
+            {request.status}
+          </div>
+          <div className="meta-item">
+            <Calendar size={12} />
+            {new Date(request.createdAt).toLocaleDateString('en-US', { 
+              month: 'short', 
+              day: 'numeric',
+              year: 'numeric'
+            })}
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-[9px] font-body font-black text-sage/50 mb-2 tracking-[0.2em]">REQUIRED</p>
-          <p className="text-5xl font-display font-bold text-forest tracking-tighter">{units}</p>
-        </div>
+        
+        <button 
+          className="action-button"
+          disabled={request.status !== 'open'}
+        >
+          <Heart size={20} />
+          {request.status === 'open' ? 'I Can Help' : 'Request Closed'}
+        </button>
       </div>
-      
-      <button className="w-full bg-gradient-to-r from-forest to-emerald-900 text-cream py-5 rounded-3xl font-body font-black hover:from-crimson hover:to-red-700 transition-all duration-500 shadow-lg hover:shadow-2xl hover:shadow-crimson/20 uppercase tracking-[0.1em] text-sm">
-        I'm Available
-      </button>
     </motion.div>
   );
 };
