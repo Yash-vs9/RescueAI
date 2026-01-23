@@ -18,6 +18,7 @@ const RescueBlood = () => {
   const [loading, setLoading] = useState(false);
   const [emergencies, setEmergencies] = useState([]);
   const [nearbyDonors, setNearbyDonors] = useState([]);
+  const [hospitalRequests, setHospitalRequests] = useState([]); // Hospital's own requests
   const [isAvailable, setIsAvailable] = useState(true);
   const [newAlert, setNewAlert] = useState(null);
 
@@ -73,6 +74,7 @@ const RescueBlood = () => {
         return [data, ...prev];
       });
       setNewAlert(data);
+      console.log(emergencies)
     });
 
     socket.on("connect_error", (err) => {
@@ -116,6 +118,24 @@ const RescueBlood = () => {
     }
   }, [userRole, coords.lat, coords.lng, token, apiUrl]);
 
+  // NEW: Fetch hospital's own blood requests
+  const fetchHospitalRequests = useCallback(async () => {
+    if (userRole !== "hospital") return;
+    try {
+      const res = await fetch(`${apiUrl}/api/blood-requests/my-requests`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      console.log(data)
+      if (data.success) {
+        setHospitalRequests(data.requests || []);
+      }
+      console.log(data.requests)
+    } catch (err) {
+      console.error("Fetch Hospital Requests Failed", err);
+    }
+  }, [userRole, token, apiUrl]);
+
   const toggleAvailability = async () => {
     try {
       const res = await fetch(`${apiUrl}/api/user/availability`, {
@@ -145,8 +165,9 @@ const RescueBlood = () => {
     if (userRole === "hospital" && coords.lat && coords.lng && !hasInitializedHospitalFetch.current) {
       hasInitializedHospitalFetch.current = true;
       fetchNearbyDonors();
+      fetchHospitalRequests(); // Fetch hospital's own requests
     }
-  }, [userRole, coords.lat, coords.lng, fetchNearbyDonors]);
+  }, [userRole, coords.lat, coords.lng, fetchNearbyDonors, fetchHospitalRequests]);
 
   // 6. API INTEGRATION - Accept Blood Request (Donor)
   const handleAcceptRequest = async (requestId) => {
@@ -189,6 +210,7 @@ const RescueBlood = () => {
     alert('Donation confirmed successfully! The donor has been notified.');
     // Refresh the nearby donors list
     fetchNearbyDonors();
+    fetchHospitalRequests(); // Also refresh hospital requests
   };
 
   const handleLogout = () => {
@@ -376,8 +398,17 @@ const RescueBlood = () => {
               className="donor-card group cursor-pointer"
               onClick={() => {
                 setSelectedDonor(donor);
-                setSelectedRequest(emergencies[0] || { _id: 'temp-request' });
-                setShowConfirmModal(true);
+                // FIXED: Use the most recent hospital request or allow selection
+                const mostRecentRequest = hospitalRequests.length > 0 
+                  ? hospitalRequests[0] 
+                  : null;
+                
+                if (mostRecentRequest) {
+                  setSelectedRequest(mostRecentRequest);
+                  setShowConfirmModal(true);
+                } else {
+                  alert('Please create a blood request first before confirming donors.');
+                }
               }}
             >
               <div className="blood-badge group-hover:scale-110 transition-transform duration-300">
@@ -696,8 +727,6 @@ const RescueBlood = () => {
           padding: 0.875rem 1.25rem;
           background: rgba(255, 255, 255, 0.9);
           color: var(--sage);
-          // CONTINUATION OF Home.jsx (Part 2 - from line ~730)
-
           border-radius: 18px;
           border: 2px solid rgba(90, 122, 107, 0.1);
           font-weight: 700;

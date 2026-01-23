@@ -6,6 +6,7 @@ import Home from './Home'
 import Auth from './Auth'
 import LiveDonorTracking from "./components/LiveDonorTracking";
 import BloodRequestForm from "./components/BloodRequestForm";
+import ChatPage from "./components/ChatPage";
 function App() {
   return (
     <Router>
@@ -14,7 +15,7 @@ function App() {
         <Route path="/auth" element={<Auth/>} />
         <Route path="/bloodForm" element={<BloodRequestForm/>} />
         <Route path="/map" element={<LiveDonorTracking/>} />
-
+        <Route path="/chat" element={<ChatPage/>} />char
         <Route path="/dashboard" element={<Dashboard/>} />
 
 

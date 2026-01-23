@@ -21,7 +21,7 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
 
     setLoading(true);
     setError('');
-
+    console.log(bloodRequest)
     try {
       const response = await fetch(`${API_URL}/api/donations/confirm`, {
         method: 'POST',
