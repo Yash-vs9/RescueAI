@@ -1,14 +1,21 @@
 import express from "express";
-import { createBloodRequest,getNearbyRequests ,getAcceptedDonors} from "../controllers/bloodRequestController.js";
+import { 
+  createBloodRequest,
+  getNearbyRequests,
+  getAcceptedDonors,
+  deleteBloodRequest  // ✅ This was missing!
+} from "../controllers/bloodRequestController.js";
 import protect from "../middleware/authMiddleware.js";
+import { bloodRequestRateLimiter } from "../middleware/rateLimiter.js";
+
+
 import BloodRequest from "../model/BloodRequest.js";
 
 const router = express.Router();
-
-router.post("/create", protect, createBloodRequest);
+router.post("/create", protect, bloodRequestRateLimiter, createBloodRequest);
 router.get("/nearby", protect, getNearbyRequests);
 router.get("/accepted-donors", protect, getAcceptedDonors);
-
+router.delete("/:id", protect, deleteBloodRequest);
 router.get('/my-requests', protect, async (req, res) => {
     try {
       // Verify that the user is a hospital

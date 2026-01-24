@@ -27,36 +27,6 @@ transporter.verify((error) => {
 });
 
 /* ============================
-   RATE LIMITING
-============================ */
-const hospitalRequestMap = new Map();
-const MAX_REQUESTS = 5;
-const TIME_WINDOW = 60 * 1000; // 1 minute
-
-const checkRateLimit = (hospitalId) => {
-  const now = Date.now();
-  const record = hospitalRequestMap.get(hospitalId);
-
-  if (record) {
-    if (now - record.firstRequestTime < TIME_WINDOW) {
-      if (record.count >= MAX_REQUESTS) {
-        return {
-          allowed: false,
-          message: `Rate limit exceeded. Maximum ${MAX_REQUESTS} requests per minute.`,
-        };
-      }
-      record.count += 1;
-    } else {
-      hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
-    }
-  } else {
-    hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
-  }
-
-  return { allowed: true };
-};
-
-/* ============================
    SEND EMAIL NOTIFICATION
 ============================ */
 const sendEmailNotification = async (donor, requestData, aiAnalysis) => {
@@ -140,18 +110,7 @@ export const createBloodRequest = async (req, res) => {
       });
     }
 
-    // 2️⃣ Rate limiting
-    const hospitalId = req.user._id.toString();
-    const rateLimitCheck = checkRateLimit(hospitalId);
-    
-    if (!rateLimitCheck.allowed) {
-      return res.status(429).json({
-        success: false,
-        message: rateLimitCheck.message,
-      });
-    }
-
-    // 3️⃣ Extract and validate input
+    // 2️⃣ Extract and validate input
     const { bloodGroup, units, urgency, description, location } = req.body;
     const lng = parseFloat(location?.coordinates?.[0]);
     const lat = parseFloat(location?.coordinates?.[1]);
@@ -160,6 +119,22 @@ export const createBloodRequest = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Missing required fields: bloodGroup, units, location with valid coordinates",
+      });
+    }
+
+    // 3️⃣ Check for duplicate open requests
+    const existingRequest = await BloodRequest.findOne({
+      hospital: req.user._id,
+      bloodGroup: bloodGroup,
+      status: "open"
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({
+        success: false,
+        message: `You already have an active request for ${bloodGroup}. Please wait for it to be fulfilled or cancel it first.`,
+        duplicateRequest: true,
+        existingRequestId: existingRequest._id
       });
     }
 
@@ -295,8 +270,8 @@ export const createBloodRequest = async (req, res) => {
       ...emailPromises,
     ]);
 
-    // 9️⃣ Success response
-    return res.status(201).json({
+    // 9️⃣ Success response with rate limit warning if present
+    const response = {
       success: true,
       message: `Blood request created${aiAnalysis ? ' with AI validation' : ''}. ${donors.length} compatible donor(s) notified via app, email, and push notifications.`,
       request: {
@@ -314,7 +289,14 @@ export const createBloodRequest = async (req, res) => {
         validated: true,
         addressValid: aiAnalysis.isAddressValid,
       } : null,
-    });
+    };
+
+    // Add rate limit warning if middleware set it
+    if (req.rateLimitWarning) {
+      response.rateLimitWarning = req.rateLimitWarning;
+    }
+
+    return res.status(201).json(response);
 
   } catch (error) {
     console.error("❌ createBloodRequest error:", error);

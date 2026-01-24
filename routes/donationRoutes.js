@@ -1,4 +1,4 @@
-// routes/donationRoutes.js
+//routes/donationRoutes.js
 import express from "express";
 import protect from "../middleware/authMiddleware.js";
 import {
@@ -10,16 +10,22 @@ import {
 
 const router = express.Router();
 
-//  Donor accepts a blood request
-router.post("/accept", protect, acceptBloodRequest);
+// ✅ Middleware to attach io to request
+const attachSocketIO = (req, res, next) => {
+  req.io = req.app.get('io');
+  next();
+};
 
-//  Hospital confirms donation (success/failure handled later)
-router.post("/confirm", protect, confirmDonation);
+// Donor accepts a blood request
+router.post("/accept", protect, attachSocketIO, acceptBloodRequest);
 
-//  Donor dashboard
+// Hospital confirms donation (with socket support)
+router.post("/confirm", protect, attachSocketIO, confirmDonation);
+
+// Donor dashboard
 router.get("/dashboard/donor", protect, getDonorDashboard);
 
-//  Hospital dashboard
+// Hospital dashboard
 router.get("/dashboard/hospital", protect, getHospitalDashboard);
 
 export default router;

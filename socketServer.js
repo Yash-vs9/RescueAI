@@ -1,3 +1,4 @@
+// socket.js (Updated)
 import http from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
@@ -48,15 +49,48 @@ io.on("connection", async (socket) => {
   // Join user-specific room
   socket.join(`user:${socket.user._id}`);
 
-  // Handle existing notifications
+  // ✅ Handle existing notifications for donors
   if (socket.user.role === "donor") {
     const pending = await Notification.find({
       donor: socket.user._id,
       isDelivered: false,
-    });
+    }).populate('hospital.id', 'name phone');
+
+    console.log(`📬 Found ${pending.length} pending notifications for ${socket.user.name}`);
 
     for (let n of pending) {
-      socket.emit("blood_request", n);
+      // Emit based on notification type
+      if (n.type === "donation_confirmed") {
+        socket.emit("donation_confirmed", {
+          _id: n._id,
+          hospitalName: n.hospital.name,
+          units: n.units,
+          bloodGroup: n.bloodGroup,
+          message: n.message,
+          type: "donation_confirmed",
+          createdAt: n.createdAt,
+        });
+      } else {
+        socket.emit("blood_request", {
+          _id: n.bloodRequest,
+          requestId: n.bloodRequest,
+          hospital: {
+            _id: n.hospital.id,
+            name: n.hospital.name,
+          },
+          hospitalName: n.hospital.name,
+          bloodGroup: n.bloodGroup,
+          units: n.units,
+          urgency: n.urgency,
+          message: n.message,
+          location: {
+            address: n.hospital.location,
+          },
+          createdAt: n.createdAt,
+        });
+      }
+
+      // Mark as delivered
       n.isDelivered = true;
       await n.save();
     }

@@ -6,17 +6,7 @@ import bloodRequestRoutes from "./routes/bloodRequestRoutes.js";
 import donationRoutes from "./routes/donationRoutes.js";
 import chatRoutes from "./routes/chat.js";
 
-import dotenv from "dotenv";
-dotenv.config(); // 👈 MUST be before using process.env
-
 const app = express();
-
-/* ====================== */
-
-/* ======================
-   ENV DETECTION
-====================== */
-const isVercel = !!process.env.VERCEL;
 
 /* ======================
    CORS CONFIG
@@ -31,11 +21,14 @@ const allowedOrigins = [
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
+  // If the request origin is in our allowed list, allow it
   if (allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
 
+  // CRITICAL: Tells Vercel/Browsers that the response varies by Origin
   res.setHeader("Vary", "Origin");
+  
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader(
     "Access-Control-Allow-Methods",
@@ -46,9 +39,9 @@ app.use((req, res, next) => {
     "Content-Type, Authorization"
   );
 
-  // ✅ CRITICAL: terminate preflight
+  // Handle Preflight (The browser sends OPTIONS before POST/PUT/DELETE)
   if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
+    return res.status(204).end();
   }
 
   next();
@@ -75,11 +68,9 @@ app.get("/", (req, res) => {
 /* ======================
    DATABASE INIT
 ====================== */
-// ✅ On Vercel: connect once per function lifecycle
-// ✅ On Render/local: normal startup
 connectDB();
 
 /* ======================
-   EXPORT FOR VERCEL & SOCKET
+   EXPORT FOR VERCEL
 ====================== */
 export default app;
