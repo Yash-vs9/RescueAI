@@ -1,12 +1,14 @@
 import express from "express";
-import { createBloodRequest,getNearbyRequests } from "../controllers/bloodRequestController.js";
+import { createBloodRequest,getNearbyRequests ,getAcceptedDonors} from "../controllers/bloodRequestController.js";
 import protect from "../middleware/authMiddleware.js";
 import BloodRequest from "../model/BloodRequest.js";
 
 const router = express.Router();
 
-router.post("/", protect, createBloodRequest);
+router.post("/create", protect, createBloodRequest);
 router.get("/nearby", protect, getNearbyRequests);
+router.get("/accepted-donors", protect, getAcceptedDonors);
+
 router.get('/my-requests', protect, async (req, res) => {
     try {
       // Verify that the user is a hospital

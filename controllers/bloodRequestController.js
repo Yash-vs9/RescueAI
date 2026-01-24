@@ -1,203 +1,351 @@
+// controllers/bloodRequestController.js
 import BloodRequest from "../model/BloodRequest.js";
 import User from "../model/User.js";
 import Notification from "../model/Notification.js";
-import bloodCompatibility from "../utils/bloodCompatibility.js";
-import nodemailer from "nodemailer";
-import { analyzeBloodRequestWithAI } from "../services/aiService.js";
 
-// =========================
-// EMAIL TRANSPORTER (GMAIL EXAMPLE)
-// =========================
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// =========================
-// HOSPITAL REQUEST RATE LIMIT
-// =========================
-const hospitalRequestMap = new Map(); // { hospitalId: { count, firstRequestTime } }
-const MAX_REQUESTS = 5; // max requests per minute
-const TIME_WINDOW = 60 * 1000; // 1 minute in ms
-
-/**
- * @desc    Create emergency request and broadcast to nearby donors
- * @route   POST /api/blood-requests
- */
+/* ============================
+   CREATE BLOOD REQUEST (Hospital)
+============================ */
 export const createBloodRequest = async (req, res) => {
   try {
+    // 1️⃣ Only hospitals can create requests
     if (req.user.role !== "hospital") {
-      return res.status(403).json({ success: false, message: "Unauthorized" });
-    }
-
-    // =======================
-    // RATE LIMIT CHECK
-    // =======================
-    const hospitalId = req.user._id.toString();
-    const now = Date.now();
-    const record = hospitalRequestMap.get(hospitalId);
-
-    if (record) {
-      if (now - record.firstRequestTime < TIME_WINDOW) {
-        if (record.count >= MAX_REQUESTS) {
-          return res.status(429).json({
-            success: false,
-            message: `You are making requests too fast! Max ${MAX_REQUESTS} requests per minute allowed.`,
-          });
-        } else {
-          record.count += 1;
-        }
-      } else {
-        // Reset counter after 1 minute
-        hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
-      }
-    } else {
-      hospitalRequestMap.set(hospitalId, { count: 1, firstRequestTime: now });
-    }
-
-    const { bloodGroup, units, urgency, location } = req.body;
-    const lng = parseFloat(location?.coordinates?.[0]);
-    const lat = parseFloat(location?.coordinates?.[1]);
-
-    if (!bloodGroup || !units || !location?.address || isNaN(lng) || isNaN(lat)) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
-    }
-
-    // =======================
-    // AI ANALYSIS
-    // =======================
-    const aiAnalysis = await analyzeBloodRequestWithAI({
-      bloodGroup,
-      units,
-      urgency,
-      address: location.address,
-      hospitalName: req.user.name
-    });
-
-    if (!aiAnalysis.isAddressValid) {
-      return res.status(400).json({
+      return res.status(403).json({
         success: false,
-        message: "The address provided appears to be invalid or contains random symbols. Please provide a clear location."
+        message: "Only hospitals can create blood requests",
       });
     }
 
-    // =======================
-    // SAVE BLOOD REQUEST
-    // =======================
-    const request = await BloodRequest.create({
+    const { bloodGroup, units, urgency, description, location } = req.body;
+
+    // 2️⃣ Validate required fields
+    if (!bloodGroup || !units || !location?.coordinates) {
+      return res.status(400).json({
+        success: false,
+        message: "bloodGroup, units, and location coordinates are required",
+      });
+    }
+
+    // 3️⃣ Create blood request
+    const bloodRequest = await BloodRequest.create({
       hospital: req.user._id,
       hospitalName: req.user.name,
       bloodGroup,
       units,
-      urgency,
-      description: aiAnalysis.aiDescription,
+      urgency: urgency || "medium",
+      description: description || "",
       location: {
-        address: location.address,
+        address: location.address || req.user.location.address,
         coordinates: {
           type: "Point",
-          coordinates: [lng, lat],
+          coordinates: location.coordinates, // [lng, lat]
         },
       },
     });
 
-    console.log(request);
-
-    // =======================
-    // FIND DONORS
-    // =======================
-    const compatibleGroups = bloodCompatibility[bloodGroup];
-    const donors = await User.find({
+    // 4️⃣ Find nearby donors (50km radius) with matching blood group and available
+    const nearbyDonors = await User.find({
       role: "donor",
-      bloodGroup: { $in: compatibleGroups },
+      bloodGroup: bloodGroup,
       isAvailable: true,
       "location.coordinates": {
-        $nearSphere: {
-          $geometry: { type: "Point", coordinates: [lng, lat] },
-          $maxDistance: 50000,
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: location.coordinates,
+          },
+          $maxDistance: 50000, // 50km in meters
         },
       },
     });
 
-    // =======================
-    // BROADCAST TO DONORS
-    // =======================
-    for (let donor of donors) {
-      const roomId = `user:${donor._id}`;
+    console.log(`✅ Found ${nearbyDonors.length} nearby donors for ${bloodGroup}`);
 
-      const notificationData = {
-        requestId: request._id,
-        hospital: { name: req.user.name, location: location.address },
-        bloodGroup,
-        units,
-        urgency,
-        description: aiAnalysis.aiDescription
-      };
-
-      if (req.io) req.io.to(roomId).emit("blood_request", notificationData);
-
-      await Notification.create({
+    // 5️⃣ Create notifications for each donor
+    const notifications = [];
+    for (const donor of nearbyDonors) {
+      const notification = await Notification.create({
         donor: donor._id,
-        bloodRequest: request._id,
-        hospital: notificationData.hospital,
+        bloodRequest: bloodRequest._id,
+        hospital: {
+          id: req.user._id,
+          name: req.user.name,
+          location: location.address,
+        },
         bloodGroup,
         units,
-        urgency,
-        message: aiAnalysis.aiDescription
+        urgency: urgency || "medium",
+        isDelivered: false,
       });
-
-      const emailOptions = {
-        from: '"Savify Admin" <your-email@gmail.com>',
-        to: donor.email,
-        subject: `🚨 Urgent: ${bloodGroup} Blood Donation Needed Near You`,
-        text: `Hi ${donor.name},\n\n${aiAnalysis.aiEmailBody}\n\nThank you,\nSavify Team`,
-      };
-
-      transporter.sendMail(emailOptions).catch(e => console.log("Email Failed", e));
+      notifications.push(notification);
     }
 
-    res.status(201).json({
-      success: true,
-      message: `AI validated request. ${donors.length} donors notified via AI-generated alerts.`,
-      request,
-    });
+    // 6️⃣ Send real-time socket notifications to all nearby donors
+    if (req.io && nearbyDonors.length > 0) {
+      const notificationData = {
+        _id: bloodRequest._id,
+        requestId: bloodRequest._id,
+        hospital: {
+          _id: req.user._id,
+          name: req.user.name,
+        },
+        hospitalName: req.user.name,
+        bloodGroup,
+        units,
+        urgency: urgency || "medium",
+        description: description || "",
+        location: {
+          address: location.address || req.user.location.address,
+          coordinates: location.coordinates,
+        },
+        status: "open",
+        createdAt: bloodRequest.createdAt,
+      };
 
+      // Emit to each donor's room
+      nearbyDonors.forEach((donor) => {
+        const roomId = `user:${donor._id}`;
+        req.io.to(roomId).emit("blood_request", notificationData);
+        console.log(`📡 Sent notification to donor: ${donor.name} (${roomId})`);
+      });
+
+      // Mark all notifications as delivered since we sent them via socket
+      await Notification.updateMany(
+        { bloodRequest: bloodRequest._id },
+        { isDelivered: true }
+      );
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `Blood request created and ${nearbyDonors.length} donors notified`,
+      request: bloodRequest,
+      notifiedDonors: nearbyDonors.length,
+    });
   } catch (error) {
-    console.error("🔥 Controller Error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("❌ createBloodRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
-/**
- * @desc    Fetch active requests nearby for the donor dashboard
- * @route   GET /api/blood-requests/nearby
- */
+/* ============================
+   GET NEARBY REQUESTS (Donor)
+============================ */
 export const getNearbyRequests = async (req, res) => {
   try {
-    const lng = parseFloat(req.query.lng);
-    const lat = parseFloat(req.query.lat);
-
-    if (isNaN(lng) || isNaN(lat)) {
-      return res.status(400).json({ success: false, message: "Valid coordinates (lat/lng) are required" });
+    // 1️⃣ Only donors can view nearby requests
+    if (req.user.role !== "donor") {
+      return res.status(403).json({
+        success: false,
+        message: "Only donors can view nearby blood requests",
+      });
     }
 
+    const { lat, lng } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lng);
+
+    // 2️⃣ Find requests within 50km, matching donor's blood group
     const requests = await BloodRequest.find({
+      bloodGroup: req.user.bloodGroup,
+      status: "open", // Only show open requests
       "location.coordinates": {
-        $nearSphere: {
+        $near: {
           $geometry: {
             type: "Point",
-            coordinates: [lng, lat],
+            coordinates: [longitude, latitude],
           },
-          $maxDistance: 50000,
+          $maxDistance: 50000, // 50km
         },
       },
-    }).sort("-createdAt");
+    })
+      .populate("hospital", "name phone")
+      .sort({ createdAt: -1 })
+      .limit(20);
 
-    res.status(200).json({ success: true, count: requests.length, requests });
+    return res.status(200).json({
+      success: true,
+      requests: requests.map((req) => ({
+        _id: req._id,
+        requestId: req._id,
+        hospital: req.hospital,
+        hospitalName: req.hospitalName,
+        bloodGroup: req.bloodGroup,
+        units: req.units,
+        urgency: req.urgency,
+        description: req.description,
+        location: req.location,
+        status: req.status,
+        acceptedDonor: req.acceptedDonor,
+        createdAt: req.createdAt,
+      })),
+    });
   } catch (error) {
-    console.error("🔥 Error in getNearbyRequests:", error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error("❌ getNearbyRequests error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================
+   GET HOSPITAL'S OWN REQUESTS
+============================ */
+export const getMyRequests = async (req, res) => {
+  try {
+    // 1️⃣ Only hospitals can view their own requests
+    if (req.user.role !== "hospital") {
+      return res.status(403).json({
+        success: false,
+        message: "Only hospitals can view their requests",
+      });
+    }
+
+    // 2️⃣ Fetch all requests created by this hospital
+    const requests = await BloodRequest.find({ hospital: req.user._id })
+      .populate("acceptedDonor", "name phone bloodGroup")
+      .sort({ createdAt: -1 });
+
+    // 3️⃣ Format response with donor info if accepted
+    const formattedRequests = requests.map((req) => ({
+      _id: req._id,
+      bloodGroup: req.bloodGroup,
+      units: req.units,
+      urgency: req.urgency,
+      description: req.description,
+      location: req.location,
+      status: req.status,
+      createdAt: req.createdAt,
+      acceptedDonor: req.acceptedDonor
+        ? {
+            _id: req.acceptedDonor._id,
+            name: req.acceptedDonor.name,
+            phone: req.acceptedDonor.phone,
+            bloodGroup: req.acceptedDonor.bloodGroup,
+          }
+        : null,
+      acceptedAt: req.acceptedAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      requests: formattedRequests,
+    });
+  } catch (error) {
+    console.error("❌ getMyRequests error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================
+   GET DONORS WHO ACCEPTED HOSPITAL REQUESTS
+============================ */
+export const getAcceptedDonors = async (req, res) => {
+  try {
+    // 1️⃣ Only hospitals can view accepted donors
+    if (req.user.role !== "hospital") {
+      return res.status(403).json({
+        success: false,
+        message: "Only hospitals can view accepted donors",
+      });
+    }
+
+    // 2️⃣ Find all requests with accepted donors
+    const requests = await BloodRequest.find({
+      hospital: req.user._id,
+      acceptedDonor: { $ne: null },
+    })
+      .populate("acceptedDonor", "name phone bloodGroup location")
+      .sort({ acceptedAt: -1 });
+
+    // 3️⃣ Extract unique donors
+    const donorsMap = new Map();
+    requests.forEach((req) => {
+      if (req.acceptedDonor) {
+        donorsMap.set(req.acceptedDonor._id.toString(), {
+          _id: req.acceptedDonor._id,
+          name: req.acceptedDonor.name,
+          phone: req.acceptedDonor.phone,
+          bloodGroup: req.acceptedDonor.bloodGroup,
+          location: req.acceptedDonor.location,
+          requestId: req._id,
+          acceptedAt: req.acceptedAt,
+        });
+      }
+    });
+
+    const donors = Array.from(donorsMap.values());
+
+    return res.status(200).json({
+      success: true,
+      donors,
+    });
+  } catch (error) {
+    console.error("❌ getAcceptedDonors error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================
+   DELETE BLOOD REQUEST
+============================ */
+export const deleteBloodRequest = async (req, res) => {
+  try {
+    if (req.user.role !== "hospital") {
+      return res.status(403).json({
+        success: false,
+        message: "Only hospitals can delete requests",
+      });
+    }
+
+    const { id } = req.params;
+
+    const request = await BloodRequest.findOne({
+      _id: id,
+      hospital: req.user._id,
+    });
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Request not found or you don't have permission",
+      });
+    }
+
+    await BloodRequest.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Blood request deleted successfully",
+    });
+  } catch (error) {
+    console.error("❌ deleteBloodRequest error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
