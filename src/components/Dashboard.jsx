@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 
 const Dashboard = () => {
-  const API_URL = import.meta.env.VITE_API_URL;
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);
@@ -23,35 +23,54 @@ const Dashboard = () => {
   
   const userRole = localStorage.getItem("role") || "guest";
   const token = localStorage.getItem("token");
-  const userName = localStorage.getItem("userName");
+  const userName = localStorage.getItem("userName") || "User";
 
   useEffect(() => {
+    // Redirect to login if no token
+    if (!token) {
+      navigate('/auth');
+      return;
+    }
     fetchDashboardData();
   }, []);
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      // Determine endpoint based on user role
       const endpoint = userRole === "donor" 
         ? "/api/donations/dashboard/donor" 
         : "/api/donations/dashboard/hospital";
       
       const response = await fetch(`${API_URL}${endpoint}`, {
         headers: {
-          Authorization: `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         },
+        credentials: 'include'
       });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.clear();
+          navigate('/auth');
+          return;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
       
       if (data.success) {
         setDashboardData(data);
       } else {
-        setError(data.message);
+        setError(data.message || "Failed to load dashboard data");
       }
     } catch (err) {
-      setError("Failed to load dashboard data");
-      console.error(err);
+      setError(err.message || "Failed to load dashboard data");
+      console.error("Dashboard fetch error:", err);
     } finally {
       setLoading(false);
     }
@@ -62,12 +81,16 @@ const Dashboard = () => {
     navigate('/auth');
   };
 
+  const refreshDashboard = () => {
+    fetchDashboardData();
+  };
+
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (error) {
-    return <ErrorScreen message={error} />;
+    return <ErrorScreen message={error} onRetry={refreshDashboard} />;
   }
 
   return (
@@ -90,12 +113,16 @@ const Dashboard = () => {
           padding: 0;
         }
 
+        body {
+          font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+          background: linear-gradient(135deg, #FDF8F3 0%, #F5EDE3 50%, #EDE3D8 100%);
+        }
+
         .dashboard-container {
           min-height: 100vh;
           background: linear-gradient(135deg, #FDF8F3 0%, #F5EDE3 50%, #EDE3D8 100%);
           position: relative;
           overflow-x: hidden;
-          font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
         }
 
         /* Organic Background */
@@ -205,6 +232,7 @@ const Dashboard = () => {
           cursor: pointer;
           font-family: 'Outfit', sans-serif;
           font-size: 0.9rem;
+          outline: none;
         }
 
         .nav-button:hover {
@@ -621,6 +649,48 @@ const Dashboard = () => {
           color: var(--sage);
         }
 
+        /* Error Screen */
+        .error-screen {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, #FDF8F3 0%, #F5EDE3 50%, #EDE3D8 100%);
+        }
+
+        .error-content {
+          text-align: center;
+          max-width: 500px;
+          padding: 3rem;
+          background: rgba(255, 255, 255, 0.9);
+          border-radius: 40px;
+          box-shadow: 0 20px 60px rgba(47, 69, 56, 0.1);
+        }
+
+        .error-message {
+          font-family: 'Outfit', sans-serif;
+          font-size: 1.2rem;
+          font-weight: 600;
+          color: var(--crimson);
+          margin-bottom: 2rem;
+        }
+
+        .error-retry-btn {
+          padding: 1rem 2rem;
+          background: linear-gradient(135deg, var(--crimson), var(--terracotta));
+          color: white;
+          border: none;
+          border-radius: 20px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .error-retry-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 30px rgba(193, 64, 61, 0.3);
+        }
+
         /* Responsive */
         @media (max-width: 1200px) {
           .chart-card.span-8,
@@ -670,11 +740,11 @@ const Dashboard = () => {
             <button className="nav-button" title="Notifications">
               <Bell size={20} />
             </button>
-            <button className="nav-button" title="Settings">
+            <button className="nav-button" title="Settings" onClick={() => navigate('/settings')}>
               <Settings size={20} />
             </button>
             <div className="user-info">
-              <p className="user-name">{userName}</p>
+              <p className="user-name">{userName} ({userRole})</p>
               <button onClick={handleLogout} className="nav-button">
                 <LogOut size={20} />
               </button>
@@ -697,11 +767,18 @@ const Dashboard = () => {
 
 // Donor Dashboard Component
 const DonorDashboard = ({ data }) => {
+  if (!data) return null;
+  
   const { profile, stats, history } = data;
+  const navigate = useNavigate();
 
   // Prepare chart data
   const monthlyData = prepareMonthlyDonationData(history);
   const bloodGroupData = prepareBloodGroupData(history);
+
+  const goToDonate = () => {
+    navigate('/donate');
+  };
 
   return (
     <>
@@ -713,7 +790,7 @@ const DonorDashboard = ({ data }) => {
           className="welcome-section"
         >
           <h1 className="welcome-title">
-            Welcome back, <span style={{ color: 'var(--crimson)' }}>{profile.name}</span>
+            Welcome back, <span style={{ color: 'var(--crimson)' }}>{profile?.name || 'Donor'}</span>
           </h1>
           <p className="welcome-subtitle">Here's your donation journey and impact overview</p>
         </motion.div>
@@ -729,49 +806,49 @@ const DonorDashboard = ({ data }) => {
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(193, 64, 61, 0.15), rgba(224, 120, 86, 0.15))' }}>
-              <Droplets className="text-crimson" size={28} />
+              <Droplets style={{ color: '#C1403D' }} size={28} />
             </div>
             <div className="stat-trend">
               <TrendingUp size={14} />
               <span>Active</span>
             </div>
           </div>
-          <div className="stat-value">{stats.totalUnitsDonated}</div>
+          <div className="stat-value">{stats?.totalUnitsDonated || 0}</div>
           <div className="stat-label">Total Units Donated (ml)</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(90, 122, 107, 0.15), rgba(52, 211, 153, 0.15))' }}>
-              <Heart className="text-sage" size={28} />
+              <Heart style={{ color: '#5A7A6B' }} size={28} />
             </div>
             <div className="stat-trend">
               <CheckCircle size={14} />
               <span>Verified</span>
             </div>
           </div>
-          <div className="stat-value">{history.length}</div>
+          <div className="stat-value">{history?.length || 0}</div>
           <div className="stat-label">Lives Saved</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(167, 139, 250, 0.15))' }}>
-              <Activity className="text-purple-600" size={28} />
+              <Activity style={{ color: '#8B5CF6' }} size={28} />
             </div>
             <div className="stat-trend">
               <Info size={14} />
-              <span>{profile.bloodGroup}</span>
+              <span>{profile?.bloodGroup || 'N/A'}</span>
             </div>
           </div>
-          <div className="stat-value">{profile.bloodGroup}</div>
+          <div className="stat-value" style={{ fontSize: '2.5rem' }}>{profile?.bloodGroup || 'N/A'}</div>
           <div className="stat-label">Blood Group</div>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card" onClick={goToDonate} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(251, 146, 60, 0.15), rgba(249, 115, 22, 0.15))' }}>
-              <Calendar className="text-orange-600" size={28} />
+              <Calendar style={{ color: '#F97316' }} size={28} />
             </div>
             <div className="stat-trend">
               <Clock size={14} />
@@ -779,9 +856,54 @@ const DonorDashboard = ({ data }) => {
             </div>
           </div>
           <div className="stat-value" style={{ fontSize: '1.75rem' }}>
-            {stats.nextEligibleDate ? new Date(stats.nextEligibleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Ready'}
+            {stats?.nextEligibleDate ? 
+              new Date(stats.nextEligibleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 
+              'Ready Now!'}
           </div>
-          <div className="stat-label">Next Eligible Date</div>
+          <div className="stat-label">{stats?.nextEligibleDate ? 'Next Eligible Date' : 'Ready to Donate!'}</div>
+        </div>
+      </motion.div>
+
+      {/* Quick Action */}
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="stat-card"
+        style={{ 
+          background: 'linear-gradient(135deg, rgba(193, 64, 61, 0.1), rgba(224, 120, 86, 0.1))',
+          border: '2px solid rgba(193, 64, 61, 0.2)',
+          cursor: 'pointer'
+        }}
+        onClick={goToDonate}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h3 style={{ 
+              fontFamily: "'Crimson Pro', serif",
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--crimson)',
+              marginBottom: '0.5rem'
+            }}>
+              Ready to Save Lives?
+            </h3>
+            <p style={{ 
+              fontFamily: "'Outfit', sans-serif",
+              color: 'var(--forest)',
+              opacity: 0.8
+            }}>
+              Find blood requests near you and make a difference
+            </p>
+          </div>
+          <div style={{
+            padding: '1rem',
+            background: 'var(--crimson)',
+            borderRadius: '20px',
+            transform: 'rotate(3deg)'
+          }}>
+            <ArrowUpRight style={{ color: 'white' }} size={28} />
+          </div>
         </div>
       </motion.div>
 
@@ -792,55 +914,57 @@ const DonorDashboard = ({ data }) => {
         transition={{ delay: 0.2 }}
         className="charts-grid"
       >
-        <div className="chart-card span-8">
-          <div className="chart-header">
-            <h3 className="chart-title">Donation Timeline</h3>
-            <div className="chart-actions">
-              <button className="chart-action-btn">
-                <Download size={18} />
-              </button>
-              <button className="chart-action-btn">
-                <Share2 size={18} />
-              </button>
+        {monthlyData.length > 0 && (
+          <div className="chart-card span-8">
+            <div className="chart-header">
+              <h3 className="chart-title">Donation Timeline</h3>
+              <div className="chart-actions">
+                <button className="chart-action-btn">
+                  <Download size={18} />
+                </button>
+                <button className="chart-action-btn">
+                  <Share2 size={18} />
+                </button>
+              </div>
             </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={monthlyData}>
+                <defs>
+                  <linearGradient id="colorUnits" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#C1403D" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#C1403D" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(47, 69, 56, 0.1)" />
+                <XAxis 
+                  dataKey="month" 
+                  tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
+                  axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
+                />
+                <YAxis 
+                  tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
+                  axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    background: 'rgba(255, 255, 255, 0.95)', 
+                    border: '2px solid rgba(193, 64, 61, 0.2)',
+                    borderRadius: '16px',
+                    padding: '12px',
+                    fontFamily: 'Outfit'
+                  }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="units" 
+                  stroke="#C1403D" 
+                  strokeWidth={3}
+                  fill="url(#colorUnits)" 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={monthlyData}>
-              <defs>
-                <linearGradient id="colorUnits" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#C1403D" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#C1403D" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(47, 69, 56, 0.1)" />
-              <XAxis 
-                dataKey="month" 
-                tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
-                axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
-              />
-              <YAxis 
-                tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
-                axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  background: 'rgba(255, 255, 255, 0.95)', 
-                  border: '2px solid rgba(193, 64, 61, 0.2)',
-                  borderRadius: '16px',
-                  padding: '12px',
-                  fontFamily: 'Outfit'
-                }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="units" 
-                stroke="#C1403D" 
-                strokeWidth={3}
-                fill="url(#colorUnits)" 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        )}
 
         <div className="chart-card span-4">
           <div className="chart-header">
@@ -871,7 +995,7 @@ const DonorDashboard = ({ data }) => {
                 color: 'white',
                 lineHeight: 1 
               }}>
-                {Math.min(100, Math.round((stats.totalUnitsDonated / 10000) * 100))}
+                {Math.min(100, Math.round(((stats?.totalUnitsDonated || 0) / 10000) * 100))}
               </div>
               <div style={{ 
                 fontFamily: 'Outfit', 
@@ -905,7 +1029,7 @@ const DonorDashboard = ({ data }) => {
             <p className="achievement-desc">Completed first donation</p>
           </div>
           
-          {stats.totalUnitsDonated >= 1000 && (
+          {(stats?.totalUnitsDonated || 0) >= 1000 && (
             <div className="achievement-card">
               <div className="achievement-icon">
                 <Heart className="text-white" size={32} />
@@ -915,7 +1039,7 @@ const DonorDashboard = ({ data }) => {
             </div>
           )}
 
-          {history.length >= 5 && (
+          {(history?.length || 0) >= 5 && (
             <div className="achievement-card">
               <div className="achievement-icon">
                 <Zap className="text-white" size={32} />
@@ -925,13 +1049,23 @@ const DonorDashboard = ({ data }) => {
             </div>
           )}
 
-          {history.length >= 10 && (
+          {(history?.length || 0) >= 10 && (
             <div className="achievement-card">
               <div className="achievement-icon">
                 <Shield className="text-white" size={32} />
               </div>
               <h4 className="achievement-title">Guardian Angel</h4>
               <p className="achievement-desc">10+ lives saved</p>
+            </div>
+          )}
+
+          {(history?.length || 0) === 0 && (
+            <div className="achievement-card" style={{ opacity: 0.6 }}>
+              <div className="achievement-icon" style={{ background: 'rgba(47, 69, 56, 0.2)' }}>
+                <Heart className="text-white" size={32} />
+              </div>
+              <h4 className="achievement-title">First Timer</h4>
+              <p className="achievement-desc">Make your first donation!</p>
             </div>
           )}
         </div>
@@ -947,12 +1081,14 @@ const DonorDashboard = ({ data }) => {
         <div className="history-card">
           <div className="history-header">
             <h3 className="history-title">Donation History</h3>
-            <button className="nav-button">
-              View All
-            </button>
+            {(history?.length || 0) > 0 && (
+              <button className="nav-button">
+                View All
+              </button>
+            )}
           </div>
           
-          {history.length > 0 ? (
+          {(history?.length || 0) > 0 ? (
             <table className="history-table">
               <thead>
                 <tr>
@@ -982,7 +1118,9 @@ const DonorDashboard = ({ data }) => {
             </table>
           ) : (
             <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--sage)', opacity: 0.6 }}>
-              No donation history yet. Start your journey today!
+              <Heart size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+              <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>No donation history yet</p>
+              <p style={{ marginTop: '0.5rem' }}>Start your journey by making your first donation!</p>
             </div>
           )}
         </div>
@@ -993,15 +1131,22 @@ const DonorDashboard = ({ data }) => {
 
 // Hospital Dashboard Component  
 const HospitalDashboard = ({ data }) => {
+  if (!data) return null;
+  
   const { profile, stats, history } = data;
+  const navigate = useNavigate();
 
   const monthlyData = prepareMonthlyDonationData(history);
-  const bloodGroupChartData = Object.entries(stats.bloodGroupSummary || {}).map(([group, units]) => ({
+  const bloodGroupChartData = Object.entries(stats?.bloodGroupSummary || {}).map(([group, units]) => ({
     name: group,
     value: units
   }));
 
   const COLORS = ['#C1403D', '#E07856', '#5A7A6B', '#2F4538', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
+
+  const goToRequests = () => {
+    navigate('/requests');
+  };
 
   return (
     <>
@@ -1013,7 +1158,7 @@ const HospitalDashboard = ({ data }) => {
           className="welcome-section"
         >
           <h1 className="welcome-title">
-            {profile.name} <span style={{ color: 'var(--crimson)' }}>Dashboard</span>
+            {profile?.name || 'Hospital'} <span style={{ color: 'var(--crimson)' }}>Dashboard</span>
           </h1>
           <p className="welcome-subtitle">Monitor blood inventory and donor activity</p>
         </motion.div>
@@ -1029,49 +1174,49 @@ const HospitalDashboard = ({ data }) => {
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(193, 64, 61, 0.15), rgba(224, 120, 86, 0.15))' }}>
-              <Droplets className="text-crimson" size={28} />
+              <Droplets style={{ color: '#C1403D' }} size={28} />
             </div>
             <div className="stat-trend">
               <TrendingUp size={14} />
               <span>Total</span>
             </div>
           </div>
-          <div className="stat-value">{stats.totalUnitsReceived}</div>
+          <div className="stat-value">{stats?.totalUnitsReceived || 0}</div>
           <div className="stat-label">Total Units Received (ml)</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(90, 122, 107, 0.15), rgba(52, 211, 153, 0.15))' }}>
-              <Users className="text-sage" size={28} />
+              <Users style={{ color: '#5A7A6B' }} size={28} />
             </div>
             <div className="stat-trend">
               <CheckCircle size={14} />
               <span>Active</span>
             </div>
           </div>
-          <div className="stat-value">{history.length}</div>
+          <div className="stat-value">{history?.length || 0}</div>
           <div className="stat-label">Total Donors</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(167, 139, 250, 0.15))' }}>
-              <BarChart3 className="text-purple-600" size={28} />
+              <BarChart3 style={{ color: '#8B5CF6' }} size={28} />
             </div>
             <div className="stat-trend">
               <Info size={14} />
               <span>Types</span>
             </div>
           </div>
-          <div className="stat-value">{Object.keys(stats.bloodGroupSummary || {}).length}</div>
+          <div className="stat-value">{Object.keys(stats?.bloodGroupSummary || {}).length}</div>
           <div className="stat-label">Blood Groups Available</div>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card" onClick={goToRequests} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, rgba(251, 146, 60, 0.15), rgba(249, 115, 22, 0.15))' }}>
-              <Activity className="text-orange-600" size={28} />
+              <Activity style={{ color: '#F97316' }} size={28} />
             </div>
             <div className="stat-trend">
               <TrendingUp size={14} />
@@ -1083,6 +1228,49 @@ const HospitalDashboard = ({ data }) => {
         </div>
       </motion.div>
 
+      {/* Quick Action */}
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="stat-card"
+        style={{ 
+          background: 'linear-gradient(135deg, rgba(90, 122, 107, 0.1), rgba(47, 69, 56, 0.1))',
+          border: '2px solid rgba(90, 122, 107, 0.2)',
+          cursor: 'pointer'
+        }}
+        onClick={goToRequests}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h3 style={{ 
+              fontFamily: "'Crimson Pro', serif",
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--forest)',
+              marginBottom: '0.5rem'
+            }}>
+              Need More Blood?
+            </h3>
+            <p style={{ 
+              fontFamily: "'Outfit', sans-serif",
+              color: 'var(--forest)',
+              opacity: 0.8
+            }}>
+              Create a new blood request to find donors
+            </p>
+          </div>
+          <div style={{
+            padding: '1rem',
+            background: 'var(--forest)',
+            borderRadius: '20px',
+            transform: 'rotate(3deg)'
+          }}>
+            <ArrowUpRight style={{ color: 'white' }} size={28} />
+          </div>
+        </div>
+      </motion.div>
+
       {/* Charts */}
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -1090,76 +1278,95 @@ const HospitalDashboard = ({ data }) => {
         transition={{ delay: 0.2 }}
         className="charts-grid"
       >
-        <div className="chart-card span-8">
-          <div className="chart-header">
-            <h3 className="chart-title">Monthly Collection Trends</h3>
-            <div className="chart-actions">
-              <button className="chart-action-btn">
-                <Download size={18} />
-              </button>
-              <button className="chart-action-btn">
-                <Share2 size={18} />
-              </button>
+        {monthlyData.length > 0 ? (
+          <div className="chart-card span-8">
+            <div className="chart-header">
+              <h3 className="chart-title">Monthly Collection Trends</h3>
+              <div className="chart-actions">
+                <button className="chart-action-btn">
+                  <Download size={18} />
+                </button>
+                <button className="chart-action-btn">
+                  <Share2 size={18} />
+                </button>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(47, 69, 56, 0.1)" />
+                <XAxis 
+                  dataKey="month" 
+                  tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
+                  axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
+                />
+                <YAxis 
+                  tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
+                  axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    background: 'rgba(255, 255, 255, 0.95)', 
+                    border: '2px solid rgba(193, 64, 61, 0.2)',
+                    borderRadius: '16px',
+                    padding: '12px',
+                    fontFamily: 'Outfit'
+                  }}
+                />
+                <Bar dataKey="units" fill="#C1403D" radius={[12, 12, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="chart-card span-8" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ textAlign: 'center', color: 'var(--sage)', opacity: 0.6 }}>
+              <BarChart3 size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+              <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>No donation data yet</p>
+              <p style={{ marginTop: '0.5rem' }}>Start by creating your first blood request</p>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(47, 69, 56, 0.1)" />
-              <XAxis 
-                dataKey="month" 
-                tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
-                axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
-              />
-              <YAxis 
-                tick={{ fill: '#5A7A6B', fontSize: 12, fontWeight: 600 }}
-                axisLine={{ stroke: 'rgba(47, 69, 56, 0.2)' }}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  background: 'rgba(255, 255, 255, 0.95)', 
-                  border: '2px solid rgba(193, 64, 61, 0.2)',
-                  borderRadius: '16px',
-                  padding: '12px',
-                  fontFamily: 'Outfit'
-                }}
-              />
-              <Bar dataKey="units" fill="#C1403D" radius={[12, 12, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        )}
 
-        <div className="chart-card span-4">
-          <div className="chart-header">
-            <h3 className="chart-title">Blood Group Distribution</h3>
+        {bloodGroupChartData.length > 0 ? (
+          <div className="chart-card span-4">
+            <div className="chart-header">
+              <h3 className="chart-title">Blood Group Distribution</h3>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <RechartsPieChart>
+                <Pie
+                  data={bloodGroupChartData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {bloodGroupChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  contentStyle={{ 
+                    background: 'rgba(255, 255, 255, 0.95)', 
+                    border: '2px solid rgba(193, 64, 61, 0.2)',
+                    borderRadius: '16px',
+                    padding: '12px',
+                    fontFamily: 'Outfit'
+                  }}
+                />
+              </RechartsPieChart>
+            </ResponsiveContainer>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <RechartsPieChart>
-              <Pie
-                data={bloodGroupChartData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {bloodGroupChartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip 
-                contentStyle={{ 
-                  background: 'rgba(255, 255, 255, 0.95)', 
-                  border: '2px solid rgba(193, 64, 61, 0.2)',
-                  borderRadius: '16px',
-                  padding: '12px',
-                  fontFamily: 'Outfit'
-                }}
-              />
-            </RechartsPieChart>
-          </ResponsiveContainer>
-        </div>
+        ) : (
+          <div className="chart-card span-4" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ textAlign: 'center', color: 'var(--sage)', opacity: 0.6 }}>
+              <PieChart size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+              <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>No blood group data</p>
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* Blood Inventory */}
@@ -1170,17 +1377,32 @@ const HospitalDashboard = ({ data }) => {
         className="achievements-section"
       >
         <h2 className="chart-title" style={{ marginBottom: '1.5rem' }}>Blood Inventory Status</h2>
-        <div className="achievements-grid">
-          {Object.entries(stats.bloodGroupSummary || {}).map(([group, units]) => (
-            <div key={group} className="achievement-card">
-              <div className="achievement-icon">
-                <Droplets className="text-white" size={32} />
+        {Object.keys(stats?.bloodGroupSummary || {}).length > 0 ? (
+          <div className="achievements-grid">
+            {Object.entries(stats.bloodGroupSummary).map(([group, units]) => (
+              <div key={group} className="achievement-card">
+                <div className="achievement-icon">
+                  <Droplets className="text-white" size={32} />
+                </div>
+                <h4 className="achievement-title">{group}</h4>
+                <p className="achievement-desc">{units} ml available</p>
               </div>
-              <h4 className="achievement-title">{group}</h4>
-              <p className="achievement-desc">{units} ml available</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '2rem', 
+            background: 'rgba(255, 255, 255, 0.5)',
+            borderRadius: '30px',
+            color: 'var(--sage)', 
+            opacity: 0.6 
+          }}>
+            <Droplets size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+            <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>No inventory data</p>
+            <p style={{ marginTop: '0.5rem' }}>Blood inventory will appear after donations</p>
+          </div>
+        )}
       </motion.div>
 
       {/* History */}
@@ -1193,12 +1415,14 @@ const HospitalDashboard = ({ data }) => {
         <div className="history-card">
           <div className="history-header">
             <h3 className="history-title">Recent Donations</h3>
-            <button className="nav-button">
-              View All
-            </button>
+            {(history?.length || 0) > 0 && (
+              <button className="nav-button">
+                View All
+              </button>
+            )}
           </div>
           
-          {history.length > 0 ? (
+          {(history?.length || 0) > 0 ? (
             <table className="history-table">
               <thead>
                 <tr>
@@ -1228,7 +1452,9 @@ const HospitalDashboard = ({ data }) => {
             </table>
           ) : (
             <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--sage)', opacity: 0.6 }}>
-              No donation records yet
+              <Users size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+              <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>No donation records yet</p>
+              <p style={{ marginTop: '0.5rem' }}>Donation history will appear here</p>
             </div>
           )}
         </div>
@@ -1239,6 +1465,8 @@ const HospitalDashboard = ({ data }) => {
 
 // Helper Functions
 const prepareMonthlyDonationData = (history) => {
+  if (!history || history.length === 0) return [];
+  
   const monthlyMap = {};
   
   history.forEach(item => {
@@ -1258,6 +1486,8 @@ const prepareMonthlyDonationData = (history) => {
 };
 
 const prepareBloodGroupData = (history) => {
+  if (!history || history.length === 0) return [];
+  
   const bloodGroupMap = {};
   
   history.forEach(item => {
@@ -1281,11 +1511,14 @@ const LoadingScreen = () => (
 );
 
 // Error Screen Component
-const ErrorScreen = ({ message }) => (
-  <div className="loading-screen">
-    <div className="loading-content">
+const ErrorScreen = ({ message, onRetry }) => (
+  <div className="error-screen">
+    <div className="error-content">
       <AlertCircle size={60} style={{ color: 'var(--crimson)', marginBottom: '1.5rem' }} />
-      <p className="loading-text" style={{ color: 'var(--crimson)' }}>{message}</p>
+      <p className="error-message">{message}</p>
+      <button onClick={onRetry} className="error-retry-btn">
+        Try Again
+      </button>
     </div>
   </div>
 );
