@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Heart, Plus, Droplets, Hospital, Search, Share2, Activity, Users,
   ShieldCheck, PlusCircle, History, Bell, LogOut, MapPin, Loader2, RefreshCcw, X, BellRing,
-  Clock, AlertCircle, CheckCircle, Navigation, Calendar
+  Clock, AlertCircle, CheckCircle, Navigation, Calendar, Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -10,40 +10,40 @@ import { io } from "socket.io-client";
 import DonationConfirmationModal from './components/DonationConfirmationModal';
 
 const RescueBlood = () => {
-  // 1. URL CONFIGURATION
   const RENDER_URL = "https://rescueai-1.onrender.com";
   const apiUrl = import.meta.env.VITE_API_URL;
 
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [emergencies, setEmergencies] = useState([]);
-  const [nearbyDonors, setNearbyDonors] = useState([]);
   const [hospitalRequests, setHospitalRequests] = useState([]); // Hospital's own requests
+  const [acceptedDonors, setAcceptedDonors] = useState([]); // Only donors who accepted
   const [isAvailable, setIsAvailable] = useState(true);
   const [newAlert, setNewAlert] = useState(null);
 
-  // Modal states for hospital donation confirmation
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedDonor, setSelectedDonor] = useState(null);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
 
-
   const [coords, setCoords] = useState({
     lat: localStorage.getItem("userLat") || null,
     lng: localStorage.getItem("userLng") || null
   });
+
+  const userRole = localStorage.getItem("role") || "guest";
+  const token = localStorage.getItem("token");
+
+  const hasInitializedDonorFetch = useRef(false);
+  const hasInitializedHospitalFetch = useRef(false);
+
   useEffect(() => {
     const fetchAvailability = async () => {
       try {
         const res = await fetch(`${apiUrl}/api/user/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
-
         const data = await res.json();
-
         if (data.success) {
           setIsAvailable(data.user.isAvailable);
         }
@@ -51,18 +51,10 @@ const RescueBlood = () => {
         console.error("Failed to fetch availability", err);
       }
     };
+    if (token) fetchAvailability();
+  }, [apiUrl, token]);
 
-    fetchAvailability();
-  }, []);
-
-  const userRole = localStorage.getItem("role") || "guest";
-  const token = localStorage.getItem("token");
-
-  // Use refs to track if initial fetch has been done
-  const hasInitializedDonorFetch = useRef(false);
-  const hasInitializedHospitalFetch = useRef(false);
-
-  // 2. GEOLOCATION
+  // GEOLOCATION
   useEffect(() => {
     if (userRole !== "guest" && (!coords.lat || !coords.lng)) {
       navigator.geolocation.getCurrentPosition(
@@ -78,9 +70,9 @@ const RescueBlood = () => {
     }
   }, [userRole, coords.lat, coords.lng]);
 
-  // 3. SOCKET INTEGRATION
+  // SOCKET INTEGRATION - FIXED FOR BOTH DONOR AND HOSPITAL
   useEffect(() => {
-    if (!token || userRole !== "donor") return;
+    if (!token) return;
 
     const socket = io(RENDER_URL, {
       auth: { token },
@@ -89,16 +81,54 @@ const RescueBlood = () => {
 
     socket.on("connect", () => console.log("📡 Connected to Render WebSocket"));
 
-    socket.on("blood_request", (data) => {
-      console.log("New Emergency Received:", data);
-      setEmergencies((prev) => {
-        const exists = prev.find(e => e.requestId === data.requestId || e._id === data.requestId);
-        if (exists) return prev;
-        return [data, ...prev];
+    // DONOR: Listen for blood requests
+    if (userRole === "donor") {
+      socket.on("blood_request", (data) => {
+        console.log("🔔 New Emergency Received:", data);
+        
+        // Add to emergencies feed
+        setEmergencies((prev) => {
+          const exists = prev.find(e => e._id === data._id || e._id === data.requestId);
+          if (exists) return prev;
+          return [data, ...prev];
+        });
+        
+        // Show popup notification
+        setNewAlert(data);
       });
-      setNewAlert(data);
-      console.log(emergencies)
-    });
+
+      socket.on("donation_confirmed", (data) => {
+        console.log("✅ Donation Confirmed:", data);
+        alert(`Thank you! ${data.hospitalName} confirmed your donation of ${data.units}ml.`);
+      });
+    }
+
+    // HOSPITAL: Listen for donor acceptances
+    if (userRole === "hospital") {
+      socket.on("donor_accepted", (data) => {
+        console.log("✅ Donor Accepted Request:", data);
+        
+        // Update the request in hospitalRequests
+        setHospitalRequests((prev) =>
+          prev.map((req) =>
+            req._id === data.requestId
+              ? { ...req, acceptedDonor: data.donor, status: "in_progress", acceptedAt: data.acceptedAt }
+              : req
+          )
+        );
+
+        // Add to accepted donors
+        setAcceptedDonors((prev) => {
+          const exists = prev.find(d => d._id === data.donor._id);
+          if (!exists) {
+            return [...prev, { ...data.donor, requestId: data.requestId, acceptedAt: data.acceptedAt }];
+          }
+          return prev;
+        });
+
+        alert(`Good news! ${data.donor.name} (${data.donor.bloodGroup}) has accepted your blood request!`);
+      });
+    }
 
     socket.on("connect_error", (err) => {
       console.error("Socket Connection Error:", err.message);
@@ -107,7 +137,7 @@ const RescueBlood = () => {
     return () => socket.disconnect();
   }, [token, userRole, RENDER_URL]);
 
-  // 4. API LOGIC - Memoized with useCallback but no dependencies that change
+  // API CALLS
   const fetchNearbyRequests = useCallback(async () => {
     if (userRole !== "donor" || !coords.lat || !coords.lng) return;
     setLoading(true);
@@ -116,7 +146,7 @@ const RescueBlood = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      console.log(data);
+      console.log("📋 Nearby Requests:", data);
       if (data.success) setEmergencies(data.requests);
     } catch (err) {
       console.error("Fetch Emergencies Failed", err);
@@ -125,86 +155,73 @@ const RescueBlood = () => {
     }
   }, [userRole, coords.lat, coords.lng, token, apiUrl]);
 
-  const fetchNearbyDonors = useCallback(async () => {
-    if (userRole !== "hospital" || !coords.lat || !coords.lng) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiUrl}/api/user/nearby?lat=${coords.lat}&lng=${coords.lng}&distance=50`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) setNearbyDonors(data.donors);
-    } catch (err) {
-      console.error("Fetch Donors Failed", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [userRole, coords.lat, coords.lng, token, apiUrl]);
-
-  // NEW: Fetch hospital's own blood requests
   const fetchHospitalRequests = useCallback(async () => {
     if (userRole !== "hospital") return;
+    setLoading(true);
     try {
       const res = await fetch(`${apiUrl}/api/blood-requests/my-requests`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      console.log(data)
+      console.log("📋 My Requests:", data);
       if (data.success) {
         setHospitalRequests(data.requests || []);
       }
-      console.log(data.requests)
     } catch (err) {
       console.error("Fetch Hospital Requests Failed", err);
+    } finally {
+      setLoading(false);
     }
   }, [userRole, token, apiUrl]);
 
- const toggleAvailability = async (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-
-  if (availabilityLoading) return;
-
-  try {
-    setAvailabilityLoading(true);
-
-    const newStatus = !isAvailable;
-
-    // ✅ optimistic UI (trust this)
-    setIsAvailable(newStatus);
-
-    const res = await fetch(`${apiUrl}/api/user/availability`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ isAvailable: newStatus }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      throw new Error("Toggle failed");
+  const fetchAcceptedDonors = useCallback(async () => {
+    if (userRole !== "hospital") return;
+    try {
+      const res = await fetch(`${apiUrl}/api/blood-requests/accepted-donors`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      console.log("👥 Accepted Donors:", data);
+      if (data.success) {
+        setAcceptedDonors(data.donors || []);
+      }
+    } catch (err) {
+      console.error("Fetch Accepted Donors Failed", err);
     }
+  }, [userRole, token, apiUrl]);
 
-    // ❌ DO NOT reset state here
+  const toggleAvailability = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (availabilityLoading) return;
 
-  } catch (err) {
-    console.error("Toggle failed", err);
+    try {
+      setAvailabilityLoading(true);
+      const newStatus = !isAvailable;
+      setIsAvailable(newStatus);
 
-    // 🔙 rollback ONLY on failure
-    setIsAvailable(prev => !prev);
-  } finally {
-    setAvailabilityLoading(false);
-  }
-};
+      const res = await fetch(`${apiUrl}/api/user/availability`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ isAvailable: newStatus }),
+      });
 
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error("Toggle failed");
+      }
+    } catch (err) {
+      console.error("Toggle failed", err);
+      setIsAvailable(prev => !prev);
+    } finally {
+      setAvailabilityLoading(false);
+    }
+  };
 
-
-
-
-  // 5. FIXED: Initial fetch only once when component mounts and conditions are met
+  // Initial fetches
   useEffect(() => {
     if (userRole === "donor" && coords.lat && coords.lng && !hasInitializedDonorFetch.current) {
       hasInitializedDonorFetch.current = true;
@@ -215,13 +232,14 @@ const RescueBlood = () => {
   useEffect(() => {
     if (userRole === "hospital" && coords.lat && coords.lng && !hasInitializedHospitalFetch.current) {
       hasInitializedHospitalFetch.current = true;
-      fetchNearbyDonors();
-      fetchHospitalRequests(); // Fetch hospital's own requests
+      fetchHospitalRequests();
+      fetchAcceptedDonors();
     }
-  }, [userRole, coords.lat, coords.lng, fetchNearbyDonors, fetchHospitalRequests]);
+  }, [userRole, coords.lat, coords.lng, fetchHospitalRequests, fetchAcceptedDonors]);
 
-  // 6. API INTEGRATION - Accept Blood Request (Donor)
+  // Accept Blood Request (Donor)
   const handleAcceptRequest = async (requestId) => {
+    console.log("🔄 Accepting request:", requestId);
     try {
       const response = await fetch(`${apiUrl}/api/donations/accept`, {
         method: 'POST',
@@ -233,15 +251,14 @@ const RescueBlood = () => {
       });
 
       const data = await response.json();
+      console.log("📦 Accept Response:", data);
 
       if (data.success) {
-        // Show success notification
-        alert('Blood request accepted successfully! The hospital will be notified.');
-
-        // Update the emergencies list to reflect the acceptance
+        alert('Blood request accepted successfully! The hospital has been notified.');
+        
         setEmergencies(prev =>
           prev.map(req =>
-            req._id === requestId || req.requestId === requestId
+            (req._id === requestId || req.requestId === requestId)
               ? { ...req, status: 'in_progress' }
               : req
           )
@@ -255,13 +272,35 @@ const RescueBlood = () => {
     }
   };
 
-  // 7. API INTEGRATION - Confirm Donation Handler (Hospital)
-  const handleConfirmDonation = (donation) => {
+  const handleConfirmDonation = async (donation) => {
     console.log('Donation confirmed:', donation);
     alert('Donation confirmed successfully! The donor has been notified.');
-    // Refresh the nearby donors list
-    fetchNearbyDonors();
-    fetchHospitalRequests(); // Also refresh hospital requests
+    fetchHospitalRequests();
+    fetchAcceptedDonors();
+  };
+
+  const handleDeleteRequest = async (requestId) => {
+    if (!confirm('Are you sure you want to delete this blood request?')) return;
+
+    try {
+      const response = await fetch(`${apiUrl}/api/blood-requests/${requestId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert('Blood request deleted successfully');
+        fetchHospitalRequests();
+        fetchAcceptedDonors();
+      } else {
+        alert(data.message || 'Failed to delete request');
+      }
+    } catch (error) {
+      console.error('Delete request error:', error);
+      alert('Failed to delete blood request');
+    }
   };
 
   const handleLogout = () => {
@@ -269,8 +308,7 @@ const RescueBlood = () => {
     navigate('/auth');
   };
 
-  // --- VIEWS ---
-
+  // --- DONOR VIEW ---
   const DonorView = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -302,19 +340,14 @@ const RescueBlood = () => {
           <ImpactCard icon={<Activity className="text-crimson" size={28} />} count="2" label="Lives Saved" />
           <div className="organic-card group hover:scale-105 transition-all duration-500">
             <div className="text-[9px] font-bold text-sage/60 uppercase tracking-[0.2em] mb-4 font-body">Availability</div>
-
             <button
               type="button"
               onClick={(e) => toggleAvailability(e)}
-
               disabled={availabilityLoading}
-
-             className={`w-16 h-9 rounded-full transition-all relative shadow-inner 
-${isAvailable ? 'bg-gradient-to-r from-sage to-emerald-400' : 'bg-stone-300'}
-${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
-
+              className={`w-16 h-9 rounded-full transition-all relative shadow-inner 
+                ${isAvailable ? 'bg-gradient-to-r from-sage to-emerald-400' : 'bg-stone-300'}
+                ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
-
               <div className={`absolute top-1 w-7 h-7 bg-cream rounded-full shadow-lg transition-all ${isAvailable ? 'left-8' : 'left-1'}`}>
                 <div className="w-full h-full rounded-full bg-gradient-to-br from-white to-stone-100"></div>
               </div>
@@ -340,10 +373,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
               {coords.lat ? 'Location Sync Active' : 'Waiting for GPS...'}
             </p>
           </div>
-          <button
-            onClick={fetchNearbyRequests}
-            className="organic-button-small group"
-          >
+          <button onClick={fetchNearbyRequests} className="organic-button-small group">
             <RefreshCcw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
           </button>
         </motion.div>
@@ -390,6 +420,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
     </motion.div>
   );
 
+  // --- HOSPITAL VIEW - FIXED TO SHOW ONLY THEIR REQUESTS AND ACCEPTED DONORS ---
   const HospitalView = () => (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -409,10 +440,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
             <p className="text-cream/80 mb-10 text-lg font-body font-medium max-w-md leading-relaxed">
               Instantly notify all available donors within 50km of your facility
             </p>
-            <button
-              onClick={() => navigate('/bloodForm')}
-              className="cta-button group/btn"
-            >
+            <button onClick={() => navigate('/bloodForm')} className="cta-button group/btn">
               <PlusCircle size={24} className="group-hover/btn:rotate-90 transition-transform duration-500" />
               Create Emergency Alert
             </button>
@@ -430,12 +458,13 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         >
           <ImpactCard
             icon={<Users className="text-sage" size={28} />}
-            count={nearbyDonors.length}
-            label="Donors Nearby"
+            count={acceptedDonors.length}
+            label="Accepted Donors"
           />
         </motion.div>
       </section>
 
+      {/* MY BLOOD REQUESTS SECTION */}
       <motion.section
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -443,42 +472,85 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         className="organic-card"
       >
         <div className="flex justify-between items-center mb-10">
-          <h3 className="text-3xl font-display font-bold text-forest">Available Donors</h3>
-          <button onClick={fetchNearbyDonors} className="organic-button-small">
+          <h3 className="text-3xl font-display font-bold text-forest">My Blood Requests</h3>
+          <button onClick={fetchHospitalRequests} className="organic-button-small">
             <RefreshCcw size={18} />
           </button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {nearbyDonors.map((donor, index) => (
-            <motion.div
-              key={donor._id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.7 + (index * 0.05), duration: 0.5 }}
-              className="donor-card group cursor-pointer"
-              onClick={() => {
-                setSelectedDonor(donor);
-                // FIXED: Use the most recent hospital request or allow selection
-                const mostRecentRequest = hospitalRequests.length > 0
-                  ? hospitalRequests[0]
-                  : null;
 
-                if (mostRecentRequest) {
-                  setSelectedRequest(mostRecentRequest);
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="animate-spin text-crimson" size={40} />
+          </div>
+        ) : hospitalRequests.length > 0 ? (
+          <div className="grid gap-6">
+            {hospitalRequests.map((request) => (
+              <HospitalRequestCard 
+                key={request._id} 
+                request={request} 
+                onDelete={handleDeleteRequest}
+                onSelectDonor={(donor) => {
+                  setSelectedDonor(donor);
+                  setSelectedRequest(request);
                   setShowConfirmModal(true);
-                } else {
-                  alert('Please create a blood request first before confirming donors.');
-                }
-              }}
-            >
-              <div className="blood-badge group-hover:scale-110 transition-transform duration-300">
-                {donor.bloodGroup}
-              </div>
-              <p className="font-body font-bold text-forest text-sm mt-4">{donor.name}</p>
-              <p className="text-xs text-sage mt-1">Click to confirm</p>
-            </motion.div>
-          ))}
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 text-sage/60">
+            <p>No blood requests yet. Create one to get started!</p>
+          </div>
+        )}
+      </motion.section>
+
+      {/* ACCEPTED DONORS SECTION */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8, duration: 0.8 }}
+        className="organic-card"
+      >
+        <div className="flex justify-between items-center mb-10">
+          <h3 className="text-3xl font-display font-bold text-forest">Donors Who Accepted</h3>
+          <button onClick={fetchAcceptedDonors} className="organic-button-small">
+            <RefreshCcw size={18} />
+          </button>
         </div>
+
+        {acceptedDonors.length > 0 ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {acceptedDonors.map((donor) => (
+              <motion.div
+                key={donor._id}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="donor-card group cursor-pointer"
+                onClick={() => {
+                  const request = hospitalRequests.find(r => r._id === donor.requestId);
+                  if (request) {
+                    setSelectedDonor(donor);
+                    setSelectedRequest(request);
+                    setShowConfirmModal(true);
+                  } else {
+                    alert('Unable to find the associated blood request');
+                  }
+                }}
+              >
+                <div className="blood-badge group-hover:scale-110 transition-transform duration-300">
+                  {donor.bloodGroup}
+                </div>
+                <p className="font-body font-bold text-forest text-sm mt-4">{donor.name}</p>
+                <p className="text-xs text-sage mt-1">{donor.phone}</p>
+                <p className="text-xs text-sage/60 mt-2">Click to confirm</p>
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 text-sage/60">
+            <p>No donors have accepted your requests yet</p>
+          </div>
+        )}
       </motion.section>
     </motion.div>
   );
@@ -497,9 +569,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           --sand: #E8DDD0;
         }
 
-        * {
-          box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         .app-container {
           min-height: 100vh;
@@ -518,20 +588,8 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           height: 200%;
           background: 
             radial-gradient(circle at 20% 30%, rgba(193, 64, 61, 0.08) 0%, transparent 50%),
-            radial-gradient(circle at 80% 70%, rgba(90, 122, 107, 0.08) 0%, transparent 50%),
-            radial-gradient(circle at 50% 50%, rgba(224, 120, 86, 0.05) 0%, transparent 60%);
+            radial-gradient(circle at 80% 70%, rgba(90, 122, 107, 0.08) 0%, transparent 50%);
           animation: breathe 20s ease-in-out infinite;
-          z-index: 0;
-          pointer-events: none;
-        }
-
-        .app-container::after {
-          content: '';
-          position: fixed;
-          inset: 0;
-          background-image: 
-            url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%232F4538' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-          opacity: 0.4;
           z-index: 0;
           pointer-events: none;
         }
@@ -541,42 +599,13 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           50% { transform: scale(1.1) rotate(5deg); }
         }
 
-        @keyframes pulse-slow {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-
-        .animate-pulse-slow {
-          animation: pulse-slow 3s ease-in-out infinite;
-        }
-
-        .font-display {
-          font-family: 'Crimson Pro', serif;
-        }
-
-        .font-body {
-          font-family: 'Outfit', sans-serif;
-        }
-
-        .text-forest {
-          color: var(--forest);
-        }
-
-        .text-crimson {
-          color: var(--crimson);
-        }
-
-        .text-sage {
-          color: var(--sage);
-        }
-
-        .text-terracotta {
-          color: var(--terracotta);
-        }
-
-        .text-cream {
-          color: var(--cream);
-        }
+        .font-display { font-family: 'Crimson Pro', serif; }
+        .font-body { font-family: 'Outfit', sans-serif; }
+        .text-forest { color: var(--forest); }
+        .text-crimson { color: var(--crimson); }
+        .text-sage { color: var(--sage); }
+        .text-terracotta { color: var(--terracotta); }
+        .text-cream { color: var(--cream); }
 
         .organic-card {
           background: rgba(255, 255, 255, 0.7);
@@ -584,20 +613,13 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           border-radius: 40px;
           padding: 3rem;
           border: 2px solid rgba(255, 255, 255, 0.8);
-          box-shadow: 
-            0 20px 60px rgba(47, 69, 56, 0.08),
-            0 5px 20px rgba(193, 64, 61, 0.05),
-            inset 0 1px 0 rgba(255, 255, 255, 0.9);
-          position: relative;
+          box-shadow: 0 20px 60px rgba(47, 69, 56, 0.08);
           transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .organic-card:hover {
           transform: translateY(-5px);
-          box-shadow: 
-            0 30px 80px rgba(47, 69, 56, 0.12),
-            0 10px 30px rgba(193, 64, 61, 0.08),
-            inset 0 1px 0 rgba(255, 255, 255, 0.9);
+          box-shadow: 0 30px 80px rgba(47, 69, 56, 0.12);
         }
 
         .organic-card-empty {
@@ -606,7 +628,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           border-radius: 50px;
           padding: 4rem;
           border: 3px dashed rgba(90, 122, 107, 0.2);
-          position: relative;
         }
 
         .organic-button-small {
@@ -616,17 +637,17 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           border-radius: 20px;
           border: 2px solid rgba(90, 122, 107, 0.1);
           box-shadow: 0 4px 15px rgba(90, 122, 107, 0.1);
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.4s;
           display: flex;
           align-items: center;
           justify-content: center;
+          cursor: pointer;
         }
 
         .organic-button-small:hover {
-          background: rgba(255, 255, 255, 0.95);
-          transform: translateY(-2px);
-          box-shadow: 0 8px 25px rgba(90, 122, 107, 0.15);
+          background: white;
           color: var(--crimson);
+          transform: translateY(-2px);
         }
 
         .broadcast-card {
@@ -635,19 +656,13 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           padding: 3.5rem;
           position: relative;
           overflow: hidden;
-          box-shadow: 
-            0 25px 70px rgba(193, 64, 61, 0.3),
-            0 10px 30px rgba(0, 0, 0, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
-          transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 25px 70px rgba(193, 64, 61, 0.3);
+          transition: all 0.5s;
         }
 
         .broadcast-card:hover {
           transform: translateY(-8px);
-          box-shadow: 
-            0 35px 90px rgba(193, 64, 61, 0.4),
-            0 15px 40px rgba(0, 0, 0, 0.15),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+          box-shadow: 0 35px 90px rgba(193, 64, 61, 0.4);
         }
 
         .cta-button {
@@ -655,27 +670,19 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           color: var(--crimson);
           padding: 1.25rem 2.5rem;
           border-radius: 25px;
-          font-family: 'Outfit', sans-serif;
           font-weight: 800;
-          font-size: 0.95rem;
           display: inline-flex;
           align-items: center;
           gap: 0.75rem;
-          box-shadow: 
-            0 10px 30px rgba(0, 0, 0, 0.2),
-            0 5px 15px rgba(193, 64, 61, 0.3);
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+          transition: all 0.4s;
           border: none;
           cursor: pointer;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
         }
 
         .cta-button:hover {
           transform: translateY(-3px) scale(1.02);
-          box-shadow: 
-            0 15px 40px rgba(0, 0, 0, 0.25),
-            0 8px 20px rgba(193, 64, 61, 0.4);
         }
 
         .donor-card {
@@ -688,12 +695,12 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           flex-direction: column;
           align-items: center;
           text-align: center;
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.4s;
           box-shadow: 0 5px 20px rgba(47, 69, 56, 0.05);
         }
 
         .donor-card:hover {
-          background: rgba(255, 255, 255, 0.95);
+          background: white;
           transform: translateY(-5px);
           box-shadow: 0 15px 40px rgba(47, 69, 56, 0.12);
         }
@@ -702,7 +709,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           width: 4rem;
           height: 4rem;
           border-radius: 22px;
-          background: linear-gradient(135deg, rgba(193, 64, 61, 0.1) 0%, rgba(224, 120, 86, 0.1) 100%);
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.1), rgba(224, 120, 86, 0.1));
           display: flex;
           align-items: center;
           justify-content: center;
@@ -711,13 +718,95 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           font-size: 1.25rem;
           color: var(--crimson);
           border: 2px solid rgba(193, 64, 61, 0.2);
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
         .donor-card:hover .blood-badge {
-          background: linear-gradient(135deg, var(--crimson) 0%, var(--terracotta) 100%);
+          background: linear-gradient(135deg, var(--crimson), var(--terracotta));
           color: var(--cream);
           border-color: transparent;
+        }
+
+        .hospital-request-card {
+          padding: 2rem;
+          background: rgba(255, 255, 255, 0.8);
+          backdrop-filter: blur(20px);
+          border-radius: 30px;
+          border: 2px solid rgba(255, 255, 255, 0.9);
+          box-shadow: 0 10px 30px rgba(47, 69, 56, 0.08);
+          transition: all 0.3s;
+        }
+
+        .hospital-request-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 15px 40px rgba(47, 69, 56, 0.12);
+        }
+
+        .blood-badge-large {
+          width: 5rem;
+          height: 5rem;
+          border-radius: 25px;
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15), rgba(224, 120, 86, 0.15));
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Crimson Pro', serif;
+          font-weight: 800;
+          font-size: 1.75rem;
+          color: var(--crimson);
+          border: 3px solid rgba(193, 64, 61, 0.3);
+        }
+
+        .urgency-badge {
+          padding: 0.5rem 1rem;
+          border-radius: 15px;
+          font-size: 0.7rem;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .urgency-high {
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15), rgba(193, 64, 61, 0.1));
+          color: var(--crimson);
+          border: 2px solid rgba(193, 64, 61, 0.2);
+        }
+
+        .urgency-medium {
+          background: linear-gradient(135deg, rgba(224, 120, 86, 0.15), rgba(224, 120, 86, 0.1));
+          color: var(--terracotta);
+          border: 2px solid rgba(224, 120, 86, 0.2);
+        }
+
+        .urgency-low {
+          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15), rgba(90, 122, 107, 0.1));
+          color: var(--sage);
+          border: 2px solid rgba(90, 122, 107, 0.2);
+        }
+
+        .status-badge {
+          padding: 0.5rem 1.25rem;
+          border-radius: 15px;
+          font-size: 0.75rem;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .status-open {
+          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15), rgba(90, 122, 107, 0.1));
+          color: var(--sage);
+          border: 2px solid rgba(90, 122, 107, 0.2);
+        }
+
+        .status-in_progress {
+          background: linear-gradient(135deg, rgba(224, 120, 86, 0.15), rgba(224, 120, 86, 0.1));
+          color: var(--terracotta);
+          border: 2px solid rgba(224, 120, 86, 0.2);
+        }
+
+        .status-completed {
+          background: linear-gradient(135deg, rgba(52, 211, 153, 0.15), rgba(52, 211, 153, 0.1));
+          color: #10b981;
+          border: 2px solid rgba(52, 211, 153, 0.2);
         }
 
         nav {
@@ -739,7 +828,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           align-items: center;
           gap: 0.75rem;
           cursor: pointer;
-          transition: transform 0.3s ease;
+          transition: transform 0.3s;
         }
 
         .logo-container:hover {
@@ -752,10 +841,10 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           border-radius: 18px;
           transform: rotate(3deg);
           box-shadow: 0 5px 20px rgba(193, 64, 61, 0.3);
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
-        .logo-container:hover .logo-icon {
+        .logo-icon:hover {
           transform: rotate(-3deg) scale(1.05);
         }
 
@@ -765,7 +854,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           font-weight: 800;
           color: var(--crimson);
           text-transform: uppercase;
-          letter-spacing: -0.02em;
         }
 
         .nav-user {
@@ -777,7 +865,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         }
 
         .nav-user-name {
-          font-family: 'Outfit', sans-serif;
           font-size: 0.9rem;
           font-weight: 700;
           color: var(--forest);
@@ -790,17 +877,16 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           border-radius: 18px;
           border: 2px solid rgba(90, 122, 107, 0.1);
           font-weight: 700;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
           display: flex;
           align-items: center;
-          justify-content: center;
+          cursor: pointer;
         }
 
         .nav-button:hover {
-          background: rgba(255, 255, 255, 1);
+          background: white;
           color: var(--crimson);
           transform: translateY(-2px);
-          box-shadow: 0 5px 20px rgba(193, 64, 61, 0.15);
         }
 
         .signin-button {
@@ -808,20 +894,16 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           color: var(--cream);
           padding: 1rem 2rem;
           border-radius: 20px;
-          font-family: 'Outfit', sans-serif;
           font-weight: 800;
-          font-size: 0.9rem;
           border: none;
           cursor: pointer;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
         }
 
         .signin-button:hover {
           background: var(--crimson);
           transform: translateY(-2px);
-          box-shadow: 0 8px 25px rgba(193, 64, 61, 0.3);
         }
 
         main {
@@ -841,10 +923,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           background: rgba(255, 255, 255, 0.95);
           backdrop-filter: blur(30px);
           border-radius: 35px;
-          box-shadow: 
-            0 25px 70px rgba(193, 64, 61, 0.25),
-            0 10px 30px rgba(0, 0, 0, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 1);
+          box-shadow: 0 25px 70px rgba(193, 64, 61, 0.25);
           padding: 2rem;
           border: 3px solid rgba(193, 64, 61, 0.2);
         }
@@ -868,11 +947,9 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           font-weight: 800;
           color: var(--forest);
           font-size: 1.35rem;
-          margin: 0;
         }
 
         .alert-text {
-          font-family: 'Outfit', sans-serif;
           font-size: 0.95rem;
           color: var(--sage);
           font-weight: 500;
@@ -896,20 +973,16 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           color: white;
           padding: 1rem;
           border-radius: 18px;
-          font-family: 'Outfit', sans-serif;
           font-weight: 800;
-          font-size: 0.85rem;
           border: none;
           cursor: pointer;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
         .alert-accept:hover {
           background: #A63634;
           transform: translateY(-2px);
-          box-shadow: 0 8px 25px rgba(193, 64, 61, 0.3);
         }
 
         .alert-ignore {
@@ -918,14 +991,11 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           color: var(--sage);
           padding: 1rem;
           border-radius: 18px;
-          font-family: 'Outfit', sans-serif;
           font-weight: 800;
-          font-size: 0.85rem;
           border: none;
           cursor: pointer;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
         .alert-ignore:hover {
@@ -938,7 +1008,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           color: rgba(90, 122, 107, 0.4);
           cursor: pointer;
           padding: 0.25rem;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
         .close-button:hover {
@@ -946,27 +1016,19 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           transform: rotate(90deg);
         }
 
-        /* Blood Request Card Styles */
         .blood-request-card {
           background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(25px);
           border-radius: 35px;
           border: 2px solid rgba(255, 255, 255, 0.9);
-          box-shadow: 
-            0 20px 60px rgba(47, 69, 56, 0.1),
-            0 5px 20px rgba(193, 64, 61, 0.05),
-            inset 0 1px 0 rgba(255, 255, 255, 1);
+          box-shadow: 0 20px 60px rgba(47, 69, 56, 0.1);
           overflow: hidden;
-          transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.5s;
         }
 
         .blood-request-card:hover {
           transform: translateY(-8px);
-          box-shadow: 
-            0 35px 80px rgba(47, 69, 56, 0.15),
-            0 10px 30px rgba(193, 64, 61, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 1);
-          border-color: rgba(193, 64, 61, 0.2);
+          box-shadow: 0 35px 80px rgba(47, 69, 56, 0.15);
         }
 
         .request-header {
@@ -991,7 +1053,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         }
 
         .hospital-avatar {
-          background: linear-gradient(135deg, var(--sage) 0%, var(--forest) 100%);
+          background: linear-gradient(135deg, var(--sage), var(--forest));
           width: 3.5rem;
           height: 3.5rem;
           border-radius: 20px;
@@ -999,7 +1061,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           align-items: center;
           justify-content: center;
           box-shadow: 0 8px 25px rgba(90, 122, 107, 0.25);
-          flex-shrink: 0;
         }
 
         .hospital-details h3 {
@@ -1008,7 +1069,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           font-weight: 800;
           color: var(--forest);
           margin: 0 0 0.25rem;
-          line-height: 1.2;
         }
 
         .request-meta {
@@ -1022,43 +1082,10 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           display: flex;
           align-items: center;
           gap: 0.4rem;
-          font-family: 'Outfit', sans-serif;
           font-size: 0.75rem;
           font-weight: 600;
           color: var(--sage);
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-
-        .urgency-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.4rem;
-          padding: 0.5rem 1rem;
-          border-radius: 15px;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.7rem;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-        }
-
-        .urgency-high {
-          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15) 0%, rgba(193, 64, 61, 0.1) 100%);
-          color: var(--crimson);
-          border: 2px solid rgba(193, 64, 61, 0.2);
-        }
-
-        .urgency-medium {
-          background: linear-gradient(135deg, rgba(224, 120, 86, 0.15) 0%, rgba(224, 120, 86, 0.1) 100%);
-          color: var(--terracotta);
-          border: 2px solid rgba(224, 120, 86, 0.2);
-        }
-
-        .urgency-low {
-          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15) 0%, rgba(90, 122, 107, 0.1) 100%);
-          color: var(--sage);
-          border: 2px solid rgba(90, 122, 107, 0.2);
         }
 
         .blood-requirement {
@@ -1066,7 +1093,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           align-items: center;
           justify-content: space-between;
           padding: 2rem;
-          background: linear-gradient(135deg, rgba(193, 64, 61, 0.05) 0%, rgba(224, 120, 86, 0.05) 100%);
+          background: linear-gradient(135deg, rgba(193, 64, 61, 0.05), rgba(224, 120, 86, 0.05));
           border-radius: 25px;
           border: 2px solid rgba(193, 64, 61, 0.1);
           margin-bottom: 1.5rem;
@@ -1079,7 +1106,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         }
 
         .blood-icon-large {
-          background: linear-gradient(135deg, var(--crimson) 0%, var(--terracotta) 100%);
+          background: linear-gradient(135deg, var(--crimson), var(--terracotta));
           padding: 1.25rem;
           border-radius: 22px;
           box-shadow: 0 10px 30px rgba(193, 64, 61, 0.3);
@@ -1091,7 +1118,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           font-weight: 800;
           color: var(--crimson);
           line-height: 1;
-          letter-spacing: -0.02em;
         }
 
         .units-display {
@@ -1099,12 +1125,10 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         }
 
         .units-label {
-          font-family: 'Outfit', sans-serif;
           font-size: 0.7rem;
           font-weight: 700;
           color: var(--sage);
           text-transform: uppercase;
-          letter-spacing: 0.1em;
           margin-bottom: 0.5rem;
         }
 
@@ -1121,7 +1145,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         }
 
         .description-text {
-          font-family: 'Outfit', sans-serif;
           font-size: 0.95rem;
           line-height: 1.7;
           color: var(--forest);
@@ -1143,56 +1166,26 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           padding: 0.75rem;
           border-radius: 15px;
           color: var(--terracotta);
-          flex-shrink: 0;
         }
 
         .location-text {
-          font-family: 'Outfit', sans-serif;
           font-size: 0.9rem;
           color: var(--forest);
           font-weight: 600;
           line-height: 1.5;
         }
 
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0.5rem 1.25rem;
-          border-radius: 15px;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.75rem;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-        }
-
-        .status-open {
-          background: linear-gradient(135deg, rgba(90, 122, 107, 0.15) 0%, rgba(90, 122, 107, 0.1) 100%);
-          color: var(--sage);
-          border: 2px solid rgba(90, 122, 107, 0.2);
-        }
-
-        .status-closed {
-          background: linear-gradient(135deg, rgba(193, 64, 61, 0.15) 0%, rgba(193, 64, 61, 0.1) 100%);
-          color: var(--crimson);
-          border: 2px solid rgba(193, 64, 61, 0.2);
-        }
-
         .action-button {
           width: 100%;
-          background: linear-gradient(135deg, var(--crimson) 0%, #A63634 100%);
+          background: linear-gradient(135deg, var(--crimson), #A63634);
           color: white;
           padding: 1.25rem;
           border-radius: 20px;
           border: none;
-          font-family: 'Outfit', sans-serif;
           font-weight: 800;
-          font-size: 0.95rem;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
           cursor: pointer;
-          transition: all 0.3s ease;
+          transition: all 0.3s;
           box-shadow: 0 10px 30px rgba(193, 64, 61, 0.3);
           display: flex;
           align-items: center;
@@ -1203,55 +1196,23 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         .action-button:hover:not(:disabled) {
           transform: translateY(-2px);
           box-shadow: 0 15px 40px rgba(193, 64, 61, 0.4);
-          background: linear-gradient(135deg, #A63634 0%, var(--crimson) 100%);
         }
 
         .action-button:disabled {
           opacity: 0.5;
           cursor: not-allowed;
-          transform: none;
         }
 
         @media (max-width: 768px) {
-          nav {
-            padding: 1.25rem 1.5rem;
-          }
-
-          main {
-            padding: 2rem 1.5rem 6rem;
-          }
-
-          .alert-popup {
-            width: calc(100% - 3rem);
-            right: 1.5rem;
-          }
-
-          .logo-text {
-            font-size: 1.5rem;
-          }
-
-          .nav-user-name {
-            display: none;
-          }
-
-          .blood-requirement {
-            flex-direction: column;
-            gap: 1.5rem;
-            text-align: center;
-          }
-
-          .units-display {
-            text-align: center;
-          }
-
-          .blood-type-display {
-            flex-direction: column;
-            gap: 1rem;
-          }
+          nav { padding: 1.25rem 1.5rem; }
+          main { padding: 2rem 1.5rem 6rem; }
+          .alert-popup { width: calc(100% - 3rem); right: 1.5rem; }
+          .logo-text { font-size: 1.5rem; }
+          .nav-user-name { display: none; }
         }
       `}</style>
 
-      {/* 🔔 REAL-TIME POPUP WITH ACCEPT HANDLER */}
+      {/* REAL-TIME POPUP */}
       <AnimatePresence>
         {newAlert && (
           <motion.div
@@ -1271,7 +1232,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
             </div>
             <h4 className="alert-title mb-2">Incoming Request!</h4>
             <p className="alert-text">
-              <strong>{newAlert.hospital?.name}</strong> is requesting
+              <strong>{newAlert.hospital?.name || newAlert.hospitalName}</strong> is requesting
               <strong> {newAlert.bloodGroup}</strong> blood immediately.
             </p>
             <div className="alert-buttons">
@@ -1292,8 +1253,8 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         )}
       </AnimatePresence>
 
-      <nav>
-        <div className="logo-container" onClick={() => navigate('/')}>
+      <nav className="flex items-center justify-between">
+        <div className="logo-container flex items-center gap-2" onClick={() => navigate('/')}>
           <div className="logo-icon">
             <Droplets className="text-cream" size={26} />
           </div>
@@ -1301,8 +1262,14 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         </div>
 
         <div className="flex items-center gap-6">
+          <button onClick={() => navigate("/dashboard")}>Dashboard</button>
+          <button onClick={() => navigate("/map")}>Map</button>
+          <button onClick={() => navigate("/chat")}>Chat</button>
+        </div>
+
+        <div className="flex items-center gap-6">
           {userRole !== "guest" ? (
-            <div className="nav-user">
+            <div className="nav-user flex items-center gap-3">
               <p className="nav-user-name">{localStorage.getItem("userName")}</p>
               <button onClick={handleLogout} className="nav-button">
                 <LogOut size={22} />
@@ -1323,7 +1290,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 1, ease: "easeOut" }}
+            transition={{ duration: 1 }}
             className="text-center space-y-16 py-24"
           >
             <div>
@@ -1331,7 +1298,7 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.2, duration: 1 }}
-                className="text-7xl md:text-9xl font-display font-bold text-forest leading-[0.85] tracking-tight mb-6"
+                className="text-7xl md:text-9xl font-display font-bold text-forest leading-[0.85] mb-6"
               >
                 Kindness in
               </motion.h1>
@@ -1339,16 +1306,10 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.4, duration: 1 }}
-                className="text-7xl md:text-9xl font-display font-bold text-crimson leading-[0.85] tracking-tight mb-8"
+                className="text-7xl md:text-9xl font-display font-bold text-crimson leading-[0.85] mb-8"
               >
                 Every Drop
               </motion.h1>
-              <motion.div
-                initial={{ scaleX: 0 }}
-                animate={{ scaleX: 1 }}
-                transition={{ delay: 0.8, duration: 0.8 }}
-                className="w-48 h-2 bg-gradient-to-r from-crimson via-terracotta to-sage mx-auto rounded-full"
-              ></motion.div>
             </div>
             <motion.button
               initial={{ opacity: 0, y: 20 }}
@@ -1364,7 +1325,6 @@ ${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
         )}
       </main>
 
-      {/* DONATION CONFIRMATION MODAL FOR HOSPITALS */}
       <DonationConfirmationModal
         isOpen={showConfirmModal}
         onClose={() => {
@@ -1386,7 +1346,7 @@ const ImpactCard = ({ icon, count, label }) => (
     <div className="mb-5 p-4 bg-gradient-to-br from-white to-stone-50 rounded-2xl shadow-sm inline-block group-hover:shadow-md transition-shadow">
       {icon}
     </div>
-    <div className="text-5xl font-display font-bold text-forest tracking-tight mb-2">{count}</div>
+    <div className="text-5xl font-display font-bold text-forest mb-2">{count}</div>
     <div className="text-[9px] font-body font-bold text-sage/60 uppercase tracking-[0.25em]">{label}</div>
   </div>
 );
@@ -1427,11 +1387,7 @@ const BloodRequestCard = ({ request, onAccept }) => {
   };
 
   return (
-    <motion.div
-      whileHover={{ y: -5 }}
-      className="blood-request-card"
-    >
-      {/* Header */}
+    <motion.div whileHover={{ y: -5 }} className="blood-request-card">
       <div className="request-header">
         <div className="hospital-info">
           <div className="hospital-avatar">
@@ -1446,7 +1402,7 @@ const BloodRequestCard = ({ request, onAccept }) => {
               </span>
               <span className="meta-item">
                 <MapPin size={12} />
-                {request.location?.address?.split(',')[request.location?.address?.split(',').length - 1]?.trim() || 'Location'}
+                {request.location?.address?.split(',').pop()?.trim() || 'Location'}
               </span>
             </div>
           </div>
@@ -1457,7 +1413,6 @@ const BloodRequestCard = ({ request, onAccept }) => {
         </div>
       </div>
 
-      {/* Body */}
       <div className="request-body">
         <div className="blood-requirement">
           <div className="blood-type-display">
@@ -1493,11 +1448,12 @@ const BloodRequestCard = ({ request, onAccept }) => {
         )}
       </div>
 
-      {/* Footer */}
       <div className="request-footer">
         <div className="flex items-center justify-between mb-4">
-          <div className={`status-badge ${request.status === 'open' ? 'status-open' : 'status-closed'}`}>
-            {request.status === 'open' ? <CheckCircle size={14} /> : <X size={14} />}
+          <div className={`status-badge status-${request.status}`}>
+            {request.status === 'open' && <CheckCircle size={14} />}
+            {request.status === 'in_progress' && <Clock size={14} />}
+            {request.status === 'completed' && <CheckCircle size={14} />}
             {request.status}
           </div>
           <div className="meta-item">
@@ -1523,9 +1479,78 @@ const BloodRequestCard = ({ request, onAccept }) => {
           ) : (
             <>
               <Heart size={20} />
-              {request.status === 'open' ? 'I Can Help' : 'Request Closed'}
+              {request.status === 'open' ? 'I Can Help' : request.status === 'in_progress' ? 'In Progress' : 'Completed'}
             </>
           )}
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
+const HospitalRequestCard = ({ request, onDelete, onSelectDonor }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="hospital-request-card"
+    >
+      <div className="flex justify-between items-start">
+        <div className="flex-1">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="blood-badge-large">
+              {request.bloodGroup}
+            </div>
+            <div>
+              <div className="text-2xl font-display font-bold text-forest">
+                {request.units} ml needed
+              </div>
+              <div className={`urgency-badge urgency-${request.urgency}`}>
+                {request.urgency} priority
+              </div>
+            </div>
+          </div>
+
+          {request.description && (
+            <p className="text-sage mb-4">{request.description}</p>
+          )}
+
+          <div className="flex flex-wrap gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <Clock size={16} className="text-terracotta" />
+              <span className="text-sage font-semibold">
+                {new Date(request.createdAt).toLocaleDateString()}
+              </span>
+            </div>
+            <div className={`status-badge status-${request.status}`}>
+              {request.status}
+            </div>
+          </div>
+
+          {request.acceptedDonor && (
+            <div className="mt-4 p-4 bg-sage/10 rounded-2xl">
+              <p className="text-sm font-bold text-sage mb-2">✅ Accepted by:</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-forest">{request.acceptedDonor.name}</p>
+                  <p className="text-sm text-sage">{request.acceptedDonor.phone}</p>
+                </div>
+                <button
+                  onClick={() => onSelectDonor(request.acceptedDonor)}
+                  className="organic-button-small"
+                >
+                  Confirm Donation
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={() => onDelete(request._id)}
+          className="organic-button-small text-crimson hover:bg-crimson/10"
+        >
+          <Trash2 size={18} />
         </button>
       </div>
     </motion.div>

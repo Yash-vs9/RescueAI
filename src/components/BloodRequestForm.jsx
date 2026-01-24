@@ -49,7 +49,7 @@ const BloodRequestForm = ({ onSuccess }) => {
         }
       );
     }
-  }, []); // Removed requestData.lat dependency to prevent re-runs while typing
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -65,6 +65,7 @@ const BloodRequestForm = ({ onSuccess }) => {
       bloodGroup: requestData.bloodGroup,
       units: Number(requestData.units),
       urgency: requestData.urgency,
+      description: requestData.address, // Add description field
       location: {
         address: requestData.address,
         coordinates: [Number(requestData.lng), Number(requestData.lat)],
@@ -72,7 +73,8 @@ const BloodRequestForm = ({ onSuccess }) => {
     };
 
     try {
-      const response = await fetch(`${API_URL}/api/blood-requests`, {
+      // FIXED: Changed endpoint from /api/blood-requests to /api/blood-requests/create
+      const response = await fetch(`${API_URL}/api/blood-requests/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -82,19 +84,31 @@ const BloodRequestForm = ({ onSuccess }) => {
       });
 
       const data = await response.json();
-      console.log(data)
+      console.log("📦 Response:", data);
 
-      if (response.ok) {  
-
+      if (response.ok && data.success) {
         setSuccess(true);
         if (onSuccess) onSuccess(data.request);
-        setRequestData(prev => ({ ...prev, bloodGroup: "", units: "", address: "" }));
-        setTimeout(() => setSuccess(false), 3000);
+        
+        // Reset form
+        setRequestData(prev => ({ 
+          ...prev, 
+          bloodGroup: "", 
+          units: "", 
+          address: "",
+          urgency: "medium"
+        }));
+        
+        // Redirect after 2 seconds
+        setTimeout(() => {
+          navigate('/');
+        }, 2000);
       } else {
-        setError(data.error || "Failed to broadcast request.");
+        setError(data.message || "Failed to broadcast request.");
       }
     } catch (err) {
-      setError("Server error. Ensure backend is on port 3000.");
+      console.error("❌ Submit error:", err);
+      setError("Server error. Ensure backend is running.");
     } finally {
       setLoading(false);
     }
@@ -128,7 +142,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
         }
 
-        /* Organic animated background */
         .blood-request-page::before {
           content: '';
           position: fixed;
@@ -178,7 +191,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           }
         }
 
-        /* Floating particles */
         .particle {
           position: fixed;
           border-radius: 50%;
@@ -229,7 +241,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           50% { transform: translateY(-40px) scale(1.1); }
         }
 
-        /* Texture overlay */
         .texture-overlay {
           position: fixed;
           inset: 0;
@@ -248,7 +259,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           flex-direction: column;
         }
 
-        /* Header Navigation */
         .page-header {
           padding: 2rem 2.5rem;
           display: flex;
@@ -311,7 +321,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           letter-spacing: -0.02em;
         }
 
-        /* Main Content Layout */
         .main-content {
           flex: 1;
           display: grid;
@@ -323,7 +332,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           width: 100%;
         }
 
-        /* Left Side - Info Panel */
         .info-panel {
           display: flex;
           flex-direction: column;
@@ -508,7 +516,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           opacity: 0.7;
         }
 
-        /* Right Side - Form Card */
         .form-container {
           animation: fadeInUp 0.8s ease 0.2s both;
         }
@@ -588,7 +595,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           font-weight: 500;
         }
 
-        /* Form Inputs */
         .input-group {
           margin-bottom: 2rem;
           position: relative;
@@ -700,7 +706,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           padding-left: 4rem;
         }
 
-        /* Messages */
         .message-box {
           padding: 1.25rem 1.75rem;
           border-radius: 25px;
@@ -725,7 +730,6 @@ const BloodRequestForm = ({ onSuccess }) => {
           border: 2px solid rgba(90, 122, 107, 0.2);
         }
 
-        /* Submit Button */
         .submit-button {
           width: 100%;
           background: linear-gradient(135deg, var(--crimson) 0%, #A63634 100%);
@@ -745,6 +749,11 @@ const BloodRequestForm = ({ onSuccess }) => {
           justify-content: center;
           gap: 0.75rem;
           transition: all 0.4s;
+        }
+
+        .submit-button:hover:not(:disabled) {
+          transform: translateY(-3px);
+          box-shadow: 0 25px 60px rgba(193, 64, 61, 0.4);
         }
 
         .submit-button:disabled {
@@ -784,16 +793,12 @@ const BloodRequestForm = ({ onSuccess }) => {
         }
       `}</style>
 
-      {/* Floating particles - Fixed to prevent blocking clicks */}
       <div className="particle particle-1"></div>
       <div className="particle particle-2"></div>
       <div className="particle particle-3"></div>
-
-      {/* Texture overlay - Fixed to prevent blocking clicks */}
       <div className="texture-overlay"></div>
 
       <div className="page-content">
-        {/* Header */}
         <header className="page-header">
           <button onClick={() => navigate('/')} className="back-button">
             <ChevronLeft size={20} />
@@ -808,9 +813,7 @@ const BloodRequestForm = ({ onSuccess }) => {
           </div>
         </header>
 
-        {/* Main Content */}
         <main className="main-content">
-          {/* Left Panel - Info */}
           <div className="info-panel">
             <div className="hero-section">
               <h1 className="hero-title">
@@ -883,7 +886,6 @@ const BloodRequestForm = ({ onSuccess }) => {
             </div>
           </div>
 
-          {/* Right Panel - Form */}
           <div className="form-container">
             <div className="form-card">
               <div className="form-header">
@@ -896,7 +898,6 @@ const BloodRequestForm = ({ onSuccess }) => {
 
               <form onSubmit={handleSubmit}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
-                  {/* Blood Group */}
                   <div className="input-group">
                     <label className="input-label">Blood Group</label>
                     <div className="select-wrapper">
@@ -919,7 +920,6 @@ const BloodRequestForm = ({ onSuccess }) => {
                     </div>
                   </div>
 
-                  {/* Units - Fixed Input Binding */}
                   <div className="input-group">
                     <label className="input-label">Units (ml)</label>
                     <input 
@@ -935,7 +935,6 @@ const BloodRequestForm = ({ onSuccess }) => {
                   </div>
                 </div>
 
-                {/* Urgency Level */}
                 <div className="input-group">
                   <label className="input-label">Urgency Level</label>
                   <div className="urgency-selector">
@@ -952,7 +951,6 @@ const BloodRequestForm = ({ onSuccess }) => {
                   </div>
                 </div>
 
-                {/* Location Details */}
                 <div className="input-group">
                   <label className="input-label">Ward / Department Details</label>
                   <div className="location-input-wrapper">
@@ -968,7 +966,6 @@ const BloodRequestForm = ({ onSuccess }) => {
                   </div>
                 </div>
 
-                {/* Error/Success Messages */}
                 <AnimatePresence mode="wait">
                   {error && (
                     <motion.div 
@@ -989,12 +986,11 @@ const BloodRequestForm = ({ onSuccess }) => {
                       className="message-box message-success"
                     >
                       <Send size={20} />
-                      <span>Broadcast Dispatched Successfully!</span>
+                      <span>✅ Broadcast Dispatched! Redirecting...</span>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                {/* Submit Button */}
                 <button 
                   disabled={loading || locationLoading} 
                   type="submit" 
