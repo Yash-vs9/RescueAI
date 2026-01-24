@@ -9,7 +9,7 @@ import { useNavigate } from "react-router-dom";
 const BloodRequestForm = ({ onSuccess }) => {
   const API_URL = import.meta.env.VITE_API_URL;
   const navigate = useNavigate();
-
+  const [rateLimitWarning, setRateLimitWarning] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -86,6 +86,11 @@ const BloodRequestForm = ({ onSuccess }) => {
       const data = await response.json();
       console.log("📦 Response:", data);
 
+      // ADD THESE 3 LINES HERE:
+      if (data.rateLimitWarning) {
+        setRateLimitWarning(data.rateLimitWarning);
+      }
+
       if (response.ok && data.success) {
         setSuccess(true);
         if (onSuccess) onSuccess(data.request);
@@ -98,6 +103,8 @@ const BloodRequestForm = ({ onSuccess }) => {
           address: "",
           urgency: "medium"
         }));
+        
+        //setRateLimitWarning(null); // ADD THIS LINE TO CLEAR WARNING ON SUCCESS
         
         // Redirect after 2 seconds
         setTimeout(() => {
@@ -113,7 +120,6 @@ const BloodRequestForm = ({ onSuccess }) => {
       setLoading(false);
     }
   };
-
   return (
     <div className="blood-request-page">
       <style>{`
@@ -966,7 +972,7 @@ const BloodRequestForm = ({ onSuccess }) => {
                   </div>
                 </div>
 
-                <AnimatePresence mode="wait">
+               <AnimatePresence mode="wait">
                   {error && (
                     <motion.div 
                       initial={{ opacity: 0, y: -10 }} 
@@ -978,6 +984,28 @@ const BloodRequestForm = ({ onSuccess }) => {
                       <span>{error}</span>
                     </motion.div>
                   )}
+
+                  {/* SHOW WARNING FIRST - BEFORE SUCCESS */}
+                  {rateLimitWarning && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -10 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: -10 }}
+                      className="message-box"
+                      style={{
+                        background: 'rgba(251, 146, 60, 0.1)',
+                        color: '#ea580c',
+                        border: '2px solid rgba(251, 146, 60, 0.2)',
+                        marginBottom: success ? '1rem' : '0'
+                      }}
+                    >
+                      <Info size={20} />
+                      <span>
+                        ⚠️ Rate Limit: {rateLimitWarning.totalRequests}/5 requests used. {rateLimitWarning.message}
+                      </span>
+                    </motion.div>
+                  )}
+                  
                   {success && (
                     <motion.div 
                       initial={{ opacity: 0, y: -10 }} 
@@ -990,6 +1018,8 @@ const BloodRequestForm = ({ onSuccess }) => {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* REMOVED THE DUPLICATE WARNING CODE HERE */}
 
                 <button 
                   disabled={loading || locationLoading} 
@@ -1021,5 +1051,4 @@ const BloodRequestForm = ({ onSuccess }) => {
     </div>
   );
 };
-
 export default BloodRequestForm;
