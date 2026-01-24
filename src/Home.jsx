@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Heart, Plus, Droplets, Hospital, Search, Share2, Activity, Users, 
+import {
+  Heart, Plus, Droplets, Hospital, Search, Share2, Activity, Users,
   ShieldCheck, PlusCircle, History, Bell, LogOut, MapPin, Loader2, RefreshCcw, X, BellRing,
   Clock, AlertCircle, CheckCircle, Navigation, Calendar
 } from 'lucide-react';
@@ -26,11 +26,34 @@ const RescueBlood = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedDonor, setSelectedDonor] = useState(null);
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+
 
   const [coords, setCoords] = useState({
     lat: localStorage.getItem("userLat") || null,
     lng: localStorage.getItem("userLng") || null
   });
+  useEffect(() => {
+    const fetchAvailability = async () => {
+      try {
+        const res = await fetch(`${apiUrl}/api/user/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          setIsAvailable(data.user.isAvailable);
+        }
+      } catch (err) {
+        console.error("Failed to fetch availability", err);
+      }
+    };
+
+    fetchAvailability();
+  }, []);
 
   const userRole = localStorage.getItem("role") || "guest";
   const token = localStorage.getItem("token");
@@ -58,8 +81,8 @@ const RescueBlood = () => {
   // 3. SOCKET INTEGRATION
   useEffect(() => {
     if (!token || userRole !== "donor") return;
-    
-    const socket = io(RENDER_URL, { 
+
+    const socket = io(RENDER_URL, {
       auth: { token },
       transports: ['websocket', 'polling']
     });
@@ -136,22 +159,50 @@ const RescueBlood = () => {
     }
   }, [userRole, token, apiUrl]);
 
-  const toggleAvailability = async () => {
-    try {
-      const res = await fetch(`${apiUrl}/api/user/availability`, {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({ isAvailable: !isAvailable })
-      });
-      const data = await res.json();
-      if (data.success) setIsAvailable(data.isAvailable);
-    } catch (err) {
-      console.error("Toggle failed", err);
+ const toggleAvailability = async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (availabilityLoading) return;
+
+  try {
+    setAvailabilityLoading(true);
+
+    const newStatus = !isAvailable;
+
+    // ✅ optimistic UI (trust this)
+    setIsAvailable(newStatus);
+
+    const res = await fetch(`${apiUrl}/api/user/availability`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ isAvailable: newStatus }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      throw new Error("Toggle failed");
     }
-  };
+
+    // ❌ DO NOT reset state here
+
+  } catch (err) {
+    console.error("Toggle failed", err);
+
+    // 🔙 rollback ONLY on failure
+    setIsAvailable(prev => !prev);
+  } finally {
+    setAvailabilityLoading(false);
+  }
+};
+
+
+
+
 
   // 5. FIXED: Initial fetch only once when component mounts and conditions are met
   useEffect(() => {
@@ -186,10 +237,10 @@ const RescueBlood = () => {
       if (data.success) {
         // Show success notification
         alert('Blood request accepted successfully! The hospital will be notified.');
-        
+
         // Update the emergencies list to reflect the acceptance
-        setEmergencies(prev => 
-          prev.map(req => 
+        setEmergencies(prev =>
+          prev.map(req =>
             req._id === requestId || req.requestId === requestId
               ? { ...req, status: 'in_progress' }
               : req
@@ -221,9 +272,9 @@ const RescueBlood = () => {
   // --- VIEWS ---
 
   const DonorView = () => (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }} 
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.8, ease: "easeOut" }}
       className="space-y-20"
     >
@@ -242,7 +293,7 @@ const RescueBlood = () => {
           <div className="w-32 h-1.5 bg-gradient-to-r from-crimson via-terracotta to-sage mx-auto rounded-full mt-6 animate-pulse-slow"></div>
         </motion.div>
 
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.8 }}
@@ -251,10 +302,19 @@ const RescueBlood = () => {
           <ImpactCard icon={<Activity className="text-crimson" size={28} />} count="2" label="Lives Saved" />
           <div className="organic-card group hover:scale-105 transition-all duration-500">
             <div className="text-[9px] font-bold text-sage/60 uppercase tracking-[0.2em] mb-4 font-body">Availability</div>
-            <button 
-              onClick={toggleAvailability} 
-              className={`w-16 h-9 rounded-full transition-all relative shadow-inner ${isAvailable ? 'bg-gradient-to-r from-sage to-emerald-400' : 'bg-stone-300'}`}
+
+            <button
+              type="button"
+              onClick={(e) => toggleAvailability(e)}
+
+              disabled={availabilityLoading}
+
+             className={`w-16 h-9 rounded-full transition-all relative shadow-inner 
+${isAvailable ? 'bg-gradient-to-r from-sage to-emerald-400' : 'bg-stone-300'}
+${availabilityLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+
             >
+
               <div className={`absolute top-1 w-7 h-7 bg-cream rounded-full shadow-lg transition-all ${isAvailable ? 'left-8' : 'left-1'}`}>
                 <div className="w-full h-full rounded-full bg-gradient-to-br from-white to-stone-100"></div>
               </div>
@@ -267,7 +327,7 @@ const RescueBlood = () => {
       </section>
 
       <section id="feed">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.7, duration: 0.8 }}
@@ -276,24 +336,24 @@ const RescueBlood = () => {
           <div>
             <h2 className="text-4xl font-display font-bold text-forest mb-2">Emergency Feed</h2>
             <p className="text-xs font-body font-semibold text-sage/70 uppercase flex items-center gap-2 tracking-wider">
-              <MapPin size={14} className="text-terracotta"/> 
+              <MapPin size={14} className="text-terracotta" />
               {coords.lat ? 'Location Sync Active' : 'Waiting for GPS...'}
             </p>
           </div>
-          <button 
-            onClick={fetchNearbyRequests} 
+          <button
+            onClick={fetchNearbyRequests}
             className="organic-button-small group"
           >
-            <RefreshCcw size={20} className="group-hover:rotate-180 transition-transform duration-700"/>
+            <RefreshCcw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
           </button>
         </motion.div>
-        
+
         {loading ? (
           <div className="flex justify-center py-24">
-            <Loader2 className="animate-spin text-crimson" size={48}/>
+            <Loader2 className="animate-spin text-crimson" size={48} />
           </div>
         ) : emergencies.length > 0 ? (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.9, staggerChildren: 0.1 }}
@@ -311,14 +371,14 @@ const RescueBlood = () => {
             ))}
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.9, duration: 0.8 }}
             className="text-center py-28 organic-card-empty"
           >
             <div className="relative inline-block mb-6">
-              <Droplets className="text-sage/20" size={72}/>
+              <Droplets className="text-sage/20" size={72} />
               <div className="absolute inset-0 blur-xl bg-sage/10 rounded-full"></div>
             </div>
             <p className="font-body font-semibold text-sage/60 italic text-lg">
@@ -331,14 +391,14 @@ const RescueBlood = () => {
   );
 
   const HospitalView = () => (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.8 }}
       className="space-y-16"
     >
       <section className="grid lg:grid-cols-3 gap-8">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2, duration: 0.8 }}
@@ -349,16 +409,16 @@ const RescueBlood = () => {
             <p className="text-cream/80 mb-10 text-lg font-body font-medium max-w-md leading-relaxed">
               Instantly notify all available donors within 50km of your facility
             </p>
-            <button 
-              onClick={() => navigate('/bloodForm')} 
+            <button
+              onClick={() => navigate('/bloodForm')}
               className="cta-button group/btn"
             >
-              <PlusCircle size={24} className="group-hover/btn:rotate-90 transition-transform duration-500"/> 
+              <PlusCircle size={24} className="group-hover/btn:rotate-90 transition-transform duration-500" />
               Create Emergency Alert
             </button>
           </div>
           <div className="absolute -right-16 -bottom-16 opacity-20">
-            <Droplets size={350} className="text-cream rotate-12"/>
+            <Droplets size={350} className="text-cream rotate-12" />
           </div>
           <div className="absolute top-10 right-20 w-32 h-32 bg-cream/10 rounded-full blur-3xl animate-pulse-slow"></div>
         </motion.div>
@@ -368,15 +428,15 @@ const RescueBlood = () => {
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.4, duration: 0.8 }}
         >
-          <ImpactCard 
-            icon={<Users className="text-sage" size={28} />} 
-            count={nearbyDonors.length} 
-            label="Donors Nearby" 
+          <ImpactCard
+            icon={<Users className="text-sage" size={28} />}
+            count={nearbyDonors.length}
+            label="Donors Nearby"
           />
         </motion.div>
       </section>
 
-      <motion.section 
+      <motion.section
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.8 }}
@@ -385,12 +445,12 @@ const RescueBlood = () => {
         <div className="flex justify-between items-center mb-10">
           <h3 className="text-3xl font-display font-bold text-forest">Available Donors</h3>
           <button onClick={fetchNearbyDonors} className="organic-button-small">
-            <RefreshCcw size={18}/>
+            <RefreshCcw size={18} />
           </button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           {nearbyDonors.map((donor, index) => (
-            <motion.div 
+            <motion.div
               key={donor._id}
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -399,10 +459,10 @@ const RescueBlood = () => {
               onClick={() => {
                 setSelectedDonor(donor);
                 // FIXED: Use the most recent hospital request or allow selection
-                const mostRecentRequest = hospitalRequests.length > 0 
-                  ? hospitalRequests[0] 
+                const mostRecentRequest = hospitalRequests.length > 0
+                  ? hospitalRequests[0]
                   : null;
-                
+
                 if (mostRecentRequest) {
                   setSelectedRequest(mostRecentRequest);
                   setShowConfirmModal(true);
@@ -1194,9 +1254,9 @@ const RescueBlood = () => {
       {/* 🔔 REAL-TIME POPUP WITH ACCEPT HANDLER */}
       <AnimatePresence>
         {newAlert && (
-          <motion.div 
-            initial={{ opacity: 0, x: 100, scale: 0.9 }} 
-            animate={{ opacity: 1, x: 0, scale: 1 }} 
+          <motion.div
+            initial={{ opacity: 0, x: 100, scale: 0.9 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 100, scale: 0.9 }}
             transition={{ type: "spring", damping: 20, stiffness: 300 }}
             className="alert-popup"
@@ -1211,11 +1271,11 @@ const RescueBlood = () => {
             </div>
             <h4 className="alert-title mb-2">Incoming Request!</h4>
             <p className="alert-text">
-              <strong>{newAlert.hospital?.name}</strong> is requesting 
+              <strong>{newAlert.hospital?.name}</strong> is requesting
               <strong> {newAlert.bloodGroup}</strong> blood immediately.
             </p>
             <div className="alert-buttons">
-              <button 
+              <button
                 className="alert-accept"
                 onClick={() => {
                   handleAcceptRequest(newAlert._id || newAlert.requestId);
@@ -1239,13 +1299,13 @@ const RescueBlood = () => {
           </div>
           <span className="logo-text">RescueBlood</span>
         </div>
-        
+
         <div className="flex items-center gap-6">
           {userRole !== "guest" ? (
             <div className="nav-user">
               <p className="nav-user-name">{localStorage.getItem("userName")}</p>
               <button onClick={handleLogout} className="nav-button">
-                <LogOut size={22}/>
+                <LogOut size={22} />
               </button>
             </div>
           ) : (
@@ -1260,14 +1320,14 @@ const RescueBlood = () => {
         {userRole === "donor" && <DonorView />}
         {userRole === "hospital" && <HospitalView />}
         {userRole === "guest" && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 1, ease: "easeOut" }}
             className="text-center space-y-16 py-24"
           >
             <div>
-              <motion.h1 
+              <motion.h1
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.2, duration: 1 }}
@@ -1275,7 +1335,7 @@ const RescueBlood = () => {
               >
                 Kindness in
               </motion.h1>
-              <motion.h1 
+              <motion.h1
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.4, duration: 1 }}
@@ -1290,11 +1350,11 @@ const RescueBlood = () => {
                 className="w-48 h-2 bg-gradient-to-r from-crimson via-terracotta to-sage mx-auto rounded-full"
               ></motion.div>
             </div>
-            <motion.button 
+            <motion.button
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 1, duration: 0.8 }}
-              onClick={() => navigate('/auth')} 
+              onClick={() => navigate('/auth')}
               className="cta-button"
               style={{ fontSize: '1.1rem', padding: '1.5rem 3rem' }}
             >
@@ -1442,15 +1502,15 @@ const BloodRequestCard = ({ request, onAccept }) => {
           </div>
           <div className="meta-item">
             <Calendar size={12} />
-            {new Date(request.createdAt).toLocaleDateString('en-US', { 
-              month: 'short', 
+            {new Date(request.createdAt).toLocaleDateString('en-US', {
+              month: 'short',
               day: 'numeric',
               year: 'numeric'
             })}
           </div>
         </div>
-        
-        <button 
+
+        <button
           className="action-button"
           onClick={handleAcceptClick}
           disabled={request.status !== 'open' || isAccepting}
