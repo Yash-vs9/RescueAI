@@ -13,20 +13,33 @@ export const analyzeBloodRequestWithAI = async (requestData) => {
   const { bloodGroup, units, urgency, address, hospitalName } = requestData;
 
   const prompt = `
-    You are an AI for RescueBlood. Analyze this emergency blood request:
-    Hospital: ${hospitalName}
-    Blood: ${bloodGroup}
-    Units: ${units}ml
-    Urgency: ${urgency}
-    Address: "${address}"
-    
-    Return ONLY a JSON object:
-    {
-      "isAddressValid": boolean,
-      "aiDescription": "short feed summary (max 150 chars)",
-      "aiEmailBody": "urgent personalized message for donor"
-    }
-  `;
+You are an AI assistant for RescueBlood.
+
+Analyze this emergency blood request:
+
+Hospital: ${hospitalName}
+Blood Group: ${bloodGroup}
+Units: ${units} ml
+Urgency: ${urgency}
+Address: "${address}"
+
+IMPORTANT RULES FOR ADDRESS VALIDATION:
+- Set "isAddressValid" to false ONLY if the address is CLEARLY FAKE.
+- A clearly fake address means:
+  - Random characters (e.g. "asdfgh", "!!!!", "123456789")
+  - Only numbers or symbols with no words
+  - Keyboard spam or meaningless text
+- Do NOT mark an address invalid just because it is short, incomplete, informal, or lacks city/state.
+- Real-world but vague addresses (e.g. "Near bus stand", "AIIMS Delhi", "City Hospital, Sector 5") are VALID.
+- Assume good intent unless the address is obviously nonsense.
+
+Return ONLY a JSON object in this exact format:
+{
+  "isAddressValid": boolean,
+  "aiDescription": "short feed summary (max 150 chars)",
+  "aiEmailBody": "urgent personalized message for donor"
+}
+`;
 
   try {
     const result = await model.generateContent(prompt);
