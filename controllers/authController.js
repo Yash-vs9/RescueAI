@@ -15,9 +15,25 @@ export const registerUser = async (req, res) => {
       });
     }
 
+    // 2️⃣ Validate blood group for donors only
+    if (role === "donor" && !bloodGroup) {
+      return res.status(400).json({
+        success: false,
+        message: "Blood group is required for donors",
+      });
+    }
+
+    // 3️⃣ Prevent blood group for hospitals
+    if (role === "hospital" && bloodGroup) {
+      return res.status(400).json({
+        success: false,
+        message: "Blood group should not be provided for hospitals",
+      });
+    }
+
     const [lng, lat] = location.coordinates; // Extract coordinates
 
-    // 2️⃣ Check if user exists
+    // 4️⃣ Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -26,17 +42,16 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    // 3️⃣ Hash password
+    // 5️⃣ Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 4️⃣ Create user (GeoJSON format)
-    const newUser = await User.create({
+    // 6️⃣ Create user (GeoJSON format) - only include bloodGroup for donors
+    const userData = {
       name,
       email,
       password: hashedPassword,
       phone,
       role,
-      bloodGroup,
       location: {
         address: location.address,
         coordinates: {
@@ -44,7 +59,14 @@ export const registerUser = async (req, res) => {
           coordinates: [lng, lat],
         },
       },
-    });
+    };
+
+    // Only add bloodGroup if user is a donor
+    if (role === "donor") {
+      userData.bloodGroup = bloodGroup;
+    }
+
+    const newUser = await User.create(userData);
 
     return res.status(201).json({
       success: true,
@@ -53,6 +75,7 @@ export const registerUser = async (req, res) => {
         id: newUser._id,
         name: newUser.name,
         role: newUser.role,
+        ...(newUser.role === "donor" && { bloodGroup: newUser.bloodGroup }),
       },
     });
   } catch (error) {
