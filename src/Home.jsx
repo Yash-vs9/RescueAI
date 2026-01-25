@@ -460,7 +460,7 @@ const RescueBlood = () => {
               <div className="absolute inset-0 blur-xl bg-sage/10 rounded-full"></div>
             </div>
             <p className="font-body font-semibold text-sage/60 italic text-lg">
-              No emergencies found in your 50km radius
+              No emergencies found in your 5km radius
             </p>
           </motion.div>
         )}
@@ -486,7 +486,7 @@ const RescueBlood = () => {
           <div className="relative z-10">
             <h2 className="text-5xl font-display font-bold mb-4 text-cream">Broadcast Need</h2>
             <p className="text-cream/80 mb-10 text-lg font-body font-medium max-w-md leading-relaxed">
-              Instantly notify all available donors within 50km of your facility
+              Instantly notify all available donors within 5 km of your facility
             </p>
             <button onClick={() => navigate('/bloodForm')} className="cta-button group/btn">
               <PlusCircle size={24} className="group-hover/btn:rotate-90 transition-transform duration-500" />

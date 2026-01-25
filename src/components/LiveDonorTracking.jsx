@@ -415,7 +415,7 @@ const LiveDonorTracking = () => {
         <aside className="donors-sidebar">
           <div className="sidebar-header">
             <h2 className="sidebar-title">Nearby Donors</h2>
-            <p style={{color:'var(--sage)'}}>Within 50km radius</p>
+            <p style={{color:'var(--sage)'}}>Within 5km radius</p>
             <div className="donors-count"><Users size={18} /><span>{donors.length} Available</span></div>
           </div>
 

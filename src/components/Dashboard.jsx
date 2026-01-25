@@ -85,12 +85,37 @@ const Dashboard = () => {
     fetchDashboardData();
   };
 
-  if (loading) {
-    return <LoadingScreen />;
-  }
+  
 
   if (error) {
     return <ErrorScreen message={error} onRetry={refreshDashboard} />;
+  }
+  if (loading) {
+    return (
+      <div className="loading-screen">
+        <style>{`
+          .loading-screen {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #FDF8F3 0%, #F5EDE3 100%);
+          }
+          .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(193, 64, 61, 0.1);
+            border-top-color: #C1403D;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+        <div className="loading-spinner"></div>
+      </div>
+    );
   }
 
   return (
