@@ -25,7 +25,7 @@ const ChatPage = () => {
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
-  const API_URL = "http://localhost:3000";
+  const API_URL = "https://rescueai-1.onrender.com";
   const token = localStorage.getItem("token");
 
   // Initialize socket connection ONCE
