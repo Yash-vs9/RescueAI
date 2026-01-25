@@ -174,7 +174,29 @@ export const confirmDonation = async (req, res) => {
       });
     }
 
-    // 6️⃣ Create donation record
+    // 🆕 6️⃣ CHECK IF DONATION ALREADY EXISTS FOR THIS BLOOD REQUEST
+    const existingDonation = await Donation.findOne({
+      bloodRequest: bloodRequestId,
+      donor: donorId,
+      hospital: req.user._id
+    });
+
+    if (existingDonation) {
+      return res.status(400).json({
+        success: false,
+        message: "This donation has already been confirmed",
+      });
+    }
+
+    // 🆕 7️⃣ CHECK IF REQUEST IS ALREADY COMPLETED
+    if (request.status === "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "This blood request has already been completed",
+      });
+    }
+
+    // 7️⃣ Create donation record
     const donation = await Donation.create({
       donor: donorId,
       hospital: req.user._id,
@@ -184,11 +206,11 @@ export const confirmDonation = async (req, res) => {
       bloodRequest: bloodRequestId,
     });
 
-    // 7️⃣ Update blood request status to completed
+    // 8️⃣ Update blood request status to completed
     request.status = "completed";
     await request.save();
 
-    // 8️⃣ Create notification for donor
+    // 9️⃣ Create notification for donor
     const notification = await Notification.create({
       donor: donorId,
       bloodRequest: bloodRequestId,
@@ -202,7 +224,7 @@ export const confirmDonation = async (req, res) => {
       isDelivered: false,
     });
 
-    // 9️⃣ Socket.io: notify donor in real-time
+    // 🔟 Socket.io: notify donor in real-time
     if (req.io) {
       const donorRoomId = `user:${donorId}`;
       req.io.to(donorRoomId).emit("donation_confirmed", {
@@ -237,6 +259,7 @@ export const confirmDonation = async (req, res) => {
     });
   }
 };
+
 
 /* ============================
    DONOR DASHBOARD
