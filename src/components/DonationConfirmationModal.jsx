@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Droplets, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -11,11 +11,29 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
+  // Check if already confirmed
+  const isAlreadyConfirmed = bloodRequest?.status === 'completed';
+
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setUnits('');
+      setError('');
+      setSuccess(false);
+    }
+  }, [isOpen]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!units || units <= 0) {
       setError('Please enter a valid number of units');
+      return;
+    }
+
+    // Double check before submitting
+    if (isAlreadyConfirmed) {
+      setError('This donation has already been confirmed');
       return;
     }
 
@@ -211,6 +229,12 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
             box-shadow: 0 0 0 4px rgba(193, 64, 61, 0.1);
           }
 
+          .form-input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background: rgba(200, 200, 200, 0.2);
+          }
+
           .error-message {
             display: flex;
             align-items: center;
@@ -270,6 +294,7 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
           .submit-button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+            background: rgba(150, 150, 150, 0.5);
           }
         `}</style>
 
@@ -301,6 +326,14 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
             </div>
           </div>
 
+          {/* Show warning if already confirmed */}
+          {isAlreadyConfirmed && (
+            <div className="error-message">
+              <AlertCircle size={18} />
+              <span>This donation has already been confirmed</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label className="form-label">Units Donated (ml)</label>
@@ -312,10 +345,11 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
                 placeholder="450"
                 min="1"
                 required
+                disabled={isAlreadyConfirmed || loading || success}
               />
             </div>
 
-            {error && (
+            {error && !isAlreadyConfirmed && (
               <div className="error-message">
                 <AlertCircle size={18} />
                 <span>{error}</span>
@@ -332,9 +366,14 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
             <button
               type="submit"
               className="submit-button"
-              disabled={loading || success}
+              disabled={loading || success || isAlreadyConfirmed}
             >
-              {loading ? (
+              {isAlreadyConfirmed ? (
+                <>
+                  <CheckCircle size={22} />
+                  <span>Already Confirmed</span>
+                </>
+              ) : loading ? (
                 <>
                   <Loader2 className="animate-spin" size={22} />
                   <span>Confirming...</span>
@@ -359,4 +398,3 @@ const DonationConfirmationModal = ({ isOpen, onClose, donor, bloodRequest, onCon
 };
 
 export default DonationConfirmationModal;
-
