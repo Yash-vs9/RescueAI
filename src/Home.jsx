@@ -19,7 +19,7 @@ const RescueBlood = () => {
   const [hospitalRequests, setHospitalRequests] = useState([]); // Hospital's own requests
   const [acceptedDonors, setAcceptedDonors] = useState([]); // Only donors who accepted
   const [isAvailable, setIsAvailable] = useState(true);
-  const [newAlert, setNewAlert] = useState(null);
+  const [livesSaved, setLivesSaved] = useState(0); // Dynamic lives saved count
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedDonor, setSelectedDonor] = useState(null);
@@ -34,10 +34,17 @@ const RescueBlood = () => {
   const userRole = localStorage.getItem("role") || "guest";
   const token = localStorage.getItem("token");
 
+  // Refs to prevent multiple API calls
   const hasInitializedDonorFetch = useRef(false);
   const hasInitializedHospitalFetch = useRef(false);
+  const hasInitializedAvailability = useRef(false);
+  const hasInitializedDashboard = useRef(false);
 
+  // Fetch availability and dashboard data on mount (once)
   useEffect(() => {
+    if (!token || hasInitializedAvailability.current) return;
+    hasInitializedAvailability.current = true;
+
     const fetchAvailability = async () => {
       try {
         const res = await fetch(`${apiUrl}/api/user/me`, {
@@ -51,8 +58,48 @@ const RescueBlood = () => {
         console.error("Failed to fetch availability", err);
       }
     };
-    if (token) fetchAvailability();
+
+    fetchAvailability();
   }, [apiUrl, token]);
+
+  // Fetch donor dashboard data (lives saved) - only for donors
+  useEffect(() => {
+    if (!token || userRole !== "donor" || hasInitializedDashboard.current) return;
+    hasInitializedDashboard.current = true;
+
+    const fetchDashboardData = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/api/donations/dashboard/donor`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            localStorage.clear();
+            navigate('/auth');
+            return;
+          }
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("Dashboard Data:", data);
+
+
+        
+          setLivesSaved(data.history.length);
+
+      } catch (err) {
+        console.error("Dashboard fetch error:", err);
+      }
+    };
+
+    fetchDashboardData();
+  }, [apiUrl, token, userRole, navigate]);
 
   // GEOLOCATION
   useEffect(() => {
@@ -92,14 +139,15 @@ const RescueBlood = () => {
           if (exists) return prev;
           return [data, ...prev];
         });
-        
-        // Show popup notification
-        setNewAlert(data);
       });
 
       socket.on("donation_confirmed", (data) => {
         console.log("✅ Donation Confirmed:", data);
         alert(`Thank you! ${data.hospitalName} confirmed your donation of ${data.units}ml.`);
+        // Refresh lives saved count
+        if (hasInitializedDashboard.current) {
+          hasInitializedDashboard.current = false;
+        }
       });
     }
 
@@ -221,7 +269,7 @@ const RescueBlood = () => {
     }
   };
 
-  // Initial fetches
+  // Initial fetches - only once
   useEffect(() => {
     if (userRole === "donor" && coords.lat && coords.lng && !hasInitializedDonorFetch.current) {
       hasInitializedDonorFetch.current = true;
@@ -337,7 +385,7 @@ const RescueBlood = () => {
           transition={{ delay: 0.5, duration: 0.8 }}
           className="flex justify-center gap-6 items-center flex-wrap pt-8"
         >
-          <ImpactCard icon={<Activity className="text-crimson" size={28} />} count="2" label="Lives Saved" />
+          <ImpactCard icon={<Activity className="text-crimson" size={28} />} count={livesSaved} label="Lives Saved" />
           <div className="organic-card group hover:scale-105 transition-all duration-500">
             <div className="text-[9px] font-bold text-sage/60 uppercase tracking-[0.2em] mb-4 font-body">Availability</div>
             <button
@@ -914,108 +962,6 @@ const RescueBlood = () => {
           z-index: 1;
         }
 
-        .alert-popup {
-          position: fixed;
-          top: 7rem;
-          right: 2rem;
-          z-index: 100;
-          width: 24rem;
-          background: rgba(255, 255, 255, 0.95);
-          backdrop-filter: blur(30px);
-          border-radius: 35px;
-          box-shadow: 0 25px 70px rgba(193, 64, 61, 0.25);
-          padding: 2rem;
-          border: 3px solid rgba(193, 64, 61, 0.2);
-        }
-
-        .alert-icon {
-          background: var(--crimson);
-          padding: 0.75rem;
-          border-radius: 18px;
-          color: white;
-          box-shadow: 0 8px 25px rgba(193, 64, 61, 0.4);
-          animation: bounce 1s ease-in-out infinite;
-        }
-
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
-        }
-
-        .alert-title {
-          font-family: 'Crimson Pro', serif;
-          font-weight: 800;
-          color: var(--forest);
-          font-size: 1.35rem;
-        }
-
-        .alert-text {
-          font-size: 0.95rem;
-          color: var(--sage);
-          font-weight: 500;
-          line-height: 1.6;
-        }
-
-        .alert-text strong {
-          color: var(--crimson);
-          font-weight: 700;
-        }
-
-        .alert-buttons {
-          display: flex;
-          gap: 0.75rem;
-          margin-top: 1.5rem;
-        }
-
-        .alert-accept {
-          flex: 1;
-          background: var(--crimson);
-          color: white;
-          padding: 1rem;
-          border-radius: 18px;
-          font-weight: 800;
-          border: none;
-          cursor: pointer;
-          text-transform: uppercase;
-          transition: all 0.3s;
-        }
-
-        .alert-accept:hover {
-          background: #A63634;
-          transform: translateY(-2px);
-        }
-
-        .alert-ignore {
-          flex: 1;
-          background: rgba(90, 122, 107, 0.1);
-          color: var(--sage);
-          padding: 1rem;
-          border-radius: 18px;
-          font-weight: 800;
-          border: none;
-          cursor: pointer;
-          text-transform: uppercase;
-          transition: all 0.3s;
-        }
-
-        .alert-ignore:hover {
-          background: rgba(90, 122, 107, 0.15);
-        }
-
-        .close-button {
-          background: none;
-          border: none;
-          color: rgba(90, 122, 107, 0.4);
-          cursor: pointer;
-          padding: 0.25rem;
-          transition: all 0.3s;
-        }
-
-        .close-button:hover {
-          color: var(--forest);
-          transform: rotate(90deg);
-        }
-
         .blood-request-card {
           background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(25px);
@@ -1206,59 +1152,17 @@ const RescueBlood = () => {
         @media (max-width: 768px) {
           nav { padding: 1.25rem 1.5rem; }
           main { padding: 2rem 1.5rem 6rem; }
-          .alert-popup { width: calc(100% - 3rem); right: 1.5rem; }
           .logo-text { font-size: 1.5rem; }
           .nav-user-name { display: none; }
         }
       `}</style>
-
-      {/* REAL-TIME POPUP */}
-      <AnimatePresence>
-        {newAlert && (
-          <motion.div
-            initial={{ opacity: 0, x: 100, scale: 0.9 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 100, scale: 0.9 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="alert-popup"
-          >
-            <div className="flex justify-between items-start mb-5">
-              <div className="alert-icon">
-                <BellRing size={22} />
-              </div>
-              <button onClick={() => setNewAlert(null)} className="close-button">
-                <X size={22} />
-              </button>
-            </div>
-            <h4 className="alert-title mb-2">Incoming Request!</h4>
-            <p className="alert-text">
-              <strong>{newAlert.hospital?.name || newAlert.hospitalName}</strong> is requesting
-              <strong> {newAlert.bloodGroup}</strong> blood immediately.
-            </p>
-            <div className="alert-buttons">
-              <button
-                className="alert-accept"
-                onClick={() => {
-                  handleAcceptRequest(newAlert._id || newAlert.requestId);
-                  setNewAlert(null);
-                }}
-              >
-                Accept
-              </button>
-              <button onClick={() => setNewAlert(null)} className="alert-ignore">
-                Ignore
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <nav className="flex items-center justify-between">
         <div className="logo-container flex items-center gap-2" onClick={() => navigate('/')}>
           <div className="logo-icon">
             <Droplets className="text-cream" size={26} />
           </div>
-          <span className="logo-text">RescueBlood</span>
+          <span className="logo-text">Savify</span>
         </div>
 
         <div className="flex items-center gap-6">

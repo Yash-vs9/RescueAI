@@ -525,6 +525,7 @@ const RescueBloodAuth = () => {
           opacity: 0.4;
           transition: all 0.3s ease;
           z-index: 1;
+          pointer-events: none;
         }
 
         .input-field {
@@ -584,27 +585,46 @@ const RescueBloodAuth = () => {
         }
 
         .select-field {
-          width: 100%;
-          background: rgba(255, 255, 255, 0.7);
-          border: 2px solid rgba(90, 122, 107, 0.15);
-          border-radius: 20px;
-          padding: 1.25rem;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.95rem;
-          font-weight: 700;
-          color: var(--forest);
-          outline: none;
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-        }
+  width: 100%;
+  background: rgba(255, 255, 255, 0.7);
+  border: 2px solid rgba(90, 122, 107, 0.15);
+  border-radius: 20px;
+  padding: 1.25rem;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--forest);
+  outline: none;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+
+  /* ADD THESE TWO LINES */
+  position: relative;
+  z-index: 2;
+
+  background-image: url("data:image/svg+xml,...");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 20px;
+  padding-right: 3rem;
+}
 
         .select-field:focus {
-          background: white;
+          background-color: white;
           border-color: var(--crimson);
           box-shadow: 
             0 0 0 4px rgba(193, 64, 61, 0.1),
             0 5px 20px rgba(193, 64, 61, 0.1);
           transform: translateY(-2px);
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23C1403D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+        }
+
+        .select-field option {
+          background: white;
+          color: var(--forest);
+          padding: 0.75rem;
         }
 
         .submit-button {

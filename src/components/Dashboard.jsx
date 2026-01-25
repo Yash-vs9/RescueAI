@@ -737,12 +737,12 @@ const Dashboard = () => {
           </div>
 
           <div className="nav-actions">
-            <button className="nav-button" title="Notifications">
+            {/* <button className="nav-button" title="Notifications">
               <Bell size={20} />
             </button>
             <button className="nav-button" title="Settings" onClick={() => navigate('/settings')}>
               <Settings size={20} />
-            </button>
+            </button> */}
             <div className="user-info">
               <p className="user-name">{userName} ({userRole})</p>
               <button onClick={handleLogout} className="nav-button">
@@ -777,7 +777,7 @@ const DonorDashboard = ({ data }) => {
   const bloodGroupData = prepareBloodGroupData(history);
 
   const goToDonate = () => {
-    navigate('/donate');
+    navigate('/');
   };
 
   return (
@@ -1145,7 +1145,7 @@ const HospitalDashboard = ({ data }) => {
   const COLORS = ['#C1403D', '#E07856', '#5A7A6B', '#2F4538', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
 
   const goToRequests = () => {
-    navigate('/requests');
+    navigate('/bloodForm');
   };
 
   return (
